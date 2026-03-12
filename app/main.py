@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Depends, Form, HTTPException
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -260,11 +260,20 @@ async def save_ot(
 
     return RedirectResponse("/dashboard", status_code=303)
 # --------------------------------------------------
-# Root
+# Root & favicon
 # --------------------------------------------------
 @app.get("/")
 def root():
     return RedirectResponse("/dashboard")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    # Minimal 1x1 transparent PNG so browser does not 404
+    return Response(
+        content=b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82',
+        media_type="image/png",
+    )
 
 # main.py
 
@@ -384,24 +393,27 @@ def delete_iol(
 from app.models import User
 from app.auth import require_admin
 from app.auth import hash_password, verify_password
+from sqlalchemy.exc import IntegrityError
+
 @app.get("/admin/users")
 def user_management(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     users = db.query(User).all()
-    current_user = db.query(User).filter(User.id == user_id.id).first()
-
+    error = request.query_params.get("error")
     return templates.TemplateResponse(
-        "admin_users.html",   # ✅ MATCHES ACTUAL FILE
+        "admin_users.html",
         {
             "request": request,
             "users": users,
-            "current_user": current_user,
+            "current_user": admin,
+            "error": error,
         },
     )
-    from app.auth import hash_password
+
+
 @app.post("/admin/users/create")
 async def create_user(
     request: Request,
@@ -409,22 +421,30 @@ async def create_user(
     admin: User = Depends(require_admin),
 ):
     form = await request.form()
-
-    username = form.get("username")
-    password = form.get("password")
-    role = form.get("role", "staff")
+    username = (form.get("username") or "").strip()
+    password = form.get("password") or ""
+    role = (form.get("role") or "staff").strip()
 
     if not username or not password:
-        raise HTTPException(status_code=400, detail="Missing fields")
+        return RedirectResponse(
+            "/admin/users?error=missing",
+            status_code=303,
+        )
 
     user = User(
         username=username,
-        password_hash = hash_password(password),
-        role=role,
+        password_hash=hash_password(password),
+        role=role if role in ("staff", "admin") else "staff",
     )
-
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(
+            "/admin/users?error=duplicate",
+            status_code=303,
+        )
 
     return RedirectResponse("/admin/users", status_code=303)
 

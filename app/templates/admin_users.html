@@ -14,6 +14,18 @@
 
     <h4>User Management</h4>
 
+    {% if error == 'duplicate' %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        That username already exists. Choose a different username.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% elif error == 'missing' %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        Please enter both username and password.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
     <!-- Create User -->
     <form method="post" action="/admin/users/create" class="row g-3 mb-4">
 

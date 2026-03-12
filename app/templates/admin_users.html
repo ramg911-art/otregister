@@ -22,7 +22,12 @@
     {% endif %}
     {% if error == 'duplicate' %}
     <div class="alert alert-warning alert-dismissible fade show" role="alert">
-        A user with that username already exists (check is case-insensitive: e.g. &quot;Admin&quot; and &quot;admin&quot; are the same). Choose a different username.
+        <strong>Username already in use.</strong>
+        {% if tried_username %}
+        You entered: <code>{{ tried_username }}</code>
+        {% endif %}
+        Existing usernames: <code>{% for u in users %}{{ u.username }}{% if not loop.last %}, {% endif %}{% endfor %}</code>.
+        Use a different username (check is case-insensitive).
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% elif error == 'missing' %}
@@ -33,14 +38,16 @@
     {% endif %}
 
     <!-- Create User -->
-    <form method="post" action="/admin/users/create" class="row g-3 mb-4">
+    <form method="post" action="/admin/users/create" class="row g-3 mb-4" id="createUserForm">
 
         <div class="col-md-3">
-            <input class="form-control" name="username" placeholder="Username" required>
+            <input class="form-control" name="username" placeholder="Username" required
+                   autocomplete="off" value="">
         </div>
 
         <div class="col-md-3">
-            <input type="password" class="form-control" name="password" placeholder="Password" required>
+            <input type="password" class="form-control" name="password" placeholder="Password" required
+                   autocomplete="new-password">
         </div>
 
         <div class="col-md-2">
@@ -51,10 +58,16 @@
         </div>
 
         <div class="col-md-2">
-            <button class="btn btn-primary">Create User</button>
+            <button type="submit" class="btn btn-primary" id="createUserBtn">Create User</button>
         </div>
 
     </form>
+    <script>
+    document.getElementById('createUserForm').addEventListener('submit', function() {
+        var btn = document.getElementById('createUserBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    });
+    </script>
 
     <!-- Users Table -->
     <table class="table table-bordered align-middle">

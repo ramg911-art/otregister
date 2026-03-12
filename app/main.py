@@ -394,6 +394,7 @@ from app.models import User
 from app.auth import require_admin
 from app.auth import hash_password, verify_password
 from sqlalchemy.exc import IntegrityError
+from urllib.parse import quote
 
 @app.get("/admin/users")
 def user_management(
@@ -404,6 +405,7 @@ def user_management(
     users = db.query(User).all()
     error = request.query_params.get("error")
     created = request.query_params.get("created")
+    tried_username = request.query_params.get("tried", "")
     return templates.TemplateResponse(
         "admin_users.html",
         {
@@ -412,6 +414,7 @@ def user_management(
             "current_user": admin,
             "error": error,
             "created": created,
+            "tried_username": tried_username,
         },
     )
 
@@ -440,7 +443,7 @@ async def create_user(
     ).first()
     if existing:
         return RedirectResponse(
-            "/admin/users?error=duplicate",
+            f"/admin/users?error=duplicate&tried={quote(username)}",
             status_code=303,
         )
 
@@ -455,7 +458,7 @@ async def create_user(
     except IntegrityError:
         db.rollback()
         return RedirectResponse(
-            "/admin/users?error=duplicate",
+            f"/admin/users?error=duplicate&tried={quote(username)}",
             status_code=303,
         )
 

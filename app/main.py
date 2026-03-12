@@ -589,7 +589,6 @@ def _admin_dashboard_dates(range_type: str, from_str: str | None, to_str: str | 
         return first_prev, last_prev
     if range_type == "last_6months":
         first = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
-        # 6 months back from start of current month
         for _ in range(5):
             first = (first.replace(day=1) - timedelta(days=1)).replace(day=1)
         return first, today
@@ -601,9 +600,100 @@ def _admin_dashboard_dates(range_type: str, from_str: str | None, to_str: str | 
                 return f, t
         except ValueError:
             pass
-    # default: month to date
     first_mtd = today.replace(day=1)
     return first_mtd, today
+
+
+def _compare_period_dates(compare: str):
+    """Return (date_from_a, date_to_a, date_from_b, date_to_b, label_a, label_b)."""
+    today = date.today()
+    if compare == "month":
+        # This month (1st to today) vs Last month
+        first_this = today.replace(day=1)
+        last_prev = first_this - timedelta(days=1)
+        first_prev = last_prev.replace(day=1)
+        return first_this, today, first_prev, last_prev, "This month", "Last month"
+    if compare == "quarter":
+        # This quarter vs Last quarter (calendar Q: 1-3, 4-6, 7-9, 10-12)
+        q = (today.month - 1) // 3 + 1
+        start_this_q = date(today.year, (q - 1) * 3 + 1, 1)
+        if q == 1:
+            start_prev_q = date(today.year - 1, 10, 1)
+            end_prev_q = date(today.year - 1, 12, 31)
+        else:
+            start_prev_q = date(today.year, (q - 2) * 3 + 1, 1)
+            end_prev_q = start_this_q - timedelta(days=1)
+        return start_this_q, today, start_prev_q, end_prev_q, "This quarter", "Last quarter"
+    if compare == "6months":
+        # Last 6 months vs 6 months before that
+        end_a = today
+        start_a = today.replace(day=1)
+        for _ in range(5):
+            start_a = (start_a - timedelta(days=1)).replace(day=1)
+        end_b = start_a - timedelta(days=1)
+        start_b = end_b.replace(day=1)
+        for _ in range(5):
+            start_b = (start_b - timedelta(days=1)).replace(day=1)
+        return start_a, end_a, start_b, end_b, "Last 6 months", "Previous 6 months"
+    if compare == "year":
+        # This year (Jan 1 to today) vs Last year (Jan 1 to Dec 31)
+        start_this = date(today.year, 1, 1)
+        start_prev = date(today.year - 1, 1, 1)
+        end_prev = date(today.year - 1, 12, 31)
+        return start_this, today, start_prev, end_prev, "This year", "Last year"
+    return None
+
+
+def _dashboard_stats_for_period(db, date_from, date_to):
+    """Return dict of stats for one period (for reuse in single and compare)."""
+    base = db.query(OTRegister).filter(
+        OTRegister.date_of_surgery >= date_from,
+        OTRegister.date_of_surgery <= date_to,
+    )
+    total_cataracts = base.filter(OTRegister.surgery == "Cataract").count()
+    total_intravitreal = base.filter(OTRegister.surgery == "Intravitreal Injection").count()
+    vue_cataract = base.filter(
+        OTRegister.surgery == "Cataract",
+        OTRegister.is_vue == True,
+    ).count()
+    vue_intravitreal = base.filter(
+        OTRegister.surgery == "Intravitreal Injection",
+        OTRegister.is_vue == True,
+    ).count()
+    top_iols = (
+        db.query(IOLMaster.iol_name, func.count(OTRegister.id).label("cnt"))
+        .join(OTRegister, OTRegister.iol_id == IOLMaster.id)
+        .filter(
+            OTRegister.date_of_surgery >= date_from,
+            OTRegister.date_of_surgery <= date_to,
+        )
+        .group_by(IOLMaster.iol_name)
+        .order_by(func.count(OTRegister.id).desc())
+        .limit(10)
+        .all()
+    )
+    category_rows = (
+        db.query(OTRegister.category, func.count(OTRegister.id).label("cnt"))
+        .filter(
+            OTRegister.date_of_surgery >= date_from,
+            OTRegister.date_of_surgery <= date_to,
+            OTRegister.category.isnot(None),
+            OTRegister.category != "",
+        )
+        .group_by(OTRegister.category)
+        .order_by(func.count(OTRegister.id).desc())
+        .all()
+    )
+    return {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "total_cataracts": total_cataracts,
+        "total_intravitreal": total_intravitreal,
+        "vue_cataract": vue_cataract,
+        "vue_intravitreal": vue_intravitreal,
+        "top_iols": [{"iol_name": n, "count": c} for n, c in top_iols],
+        "category_counts": [{"category": c or "Other", "count": n} for c, n in category_rows],
+    }
 
 
 @app.get("/admin/dashboard")
@@ -625,62 +715,35 @@ def admin_dashboard_api(
     range_type: str = "mtd",
     from_date: str | None = None,
     to_date: str | None = None,
+    compare: str | None = None,
 ):
+    # Compare mode: two periods (this month vs last month, etc.)
+    if compare and compare in ("month", "quarter", "6months", "year"):
+        res = _compare_period_dates(compare)
+        if res:
+            (date_from_a, date_to_a, date_from_b, date_to_b, label_a, label_b) = res
+            stats_a = _dashboard_stats_for_period(db, date_from_a, date_to_a)
+            stats_b = _dashboard_stats_for_period(db, date_from_b, date_to_b)
+            return JSONResponse({
+                "compare": True,
+                "label_a": label_a,
+                "label_b": label_b,
+                "period_a": stats_a,
+                "period_b": stats_b,
+            })
+    # Single period
     date_from, date_to = _admin_dashboard_dates(range_type, from_date, to_date)
-
-    base = db.query(OTRegister).filter(
-        OTRegister.date_of_surgery >= date_from,
-        OTRegister.date_of_surgery <= date_to,
-    )
-
-    total_cataracts = base.filter(OTRegister.surgery == "Cataract").count()
-    total_intravitreal = base.filter(OTRegister.surgery == "Intravitreal Injection").count()
-    vue_cataract = base.filter(
-        OTRegister.surgery == "Cataract",
-        OTRegister.is_vue == True,
-    ).count()
-    vue_intravitreal = base.filter(
-        OTRegister.surgery == "Intravitreal Injection",
-        OTRegister.is_vue == True,
-    ).count()
-
-    top_iols = (
-        db.query(IOLMaster.iol_name, func.count(OTRegister.id).label("cnt"))
-        .join(OTRegister, OTRegister.iol_id == IOLMaster.id)
-        .filter(
-            OTRegister.date_of_surgery >= date_from,
-            OTRegister.date_of_surgery <= date_to,
-        )
-        .group_by(IOLMaster.iol_name)
-        .order_by(func.count(OTRegister.id).desc())
-        .limit(10)
-        .all()
-    )
-    top_iols_list = [{"iol_name": name, "count": c} for name, c in top_iols]
-
-    category_rows = (
-        db.query(OTRegister.category, func.count(OTRegister.id).label("cnt"))
-        .filter(
-            OTRegister.date_of_surgery >= date_from,
-            OTRegister.date_of_surgery <= date_to,
-            OTRegister.category.isnot(None),
-            OTRegister.category != "",
-        )
-        .group_by(OTRegister.category)
-        .order_by(func.count(OTRegister.id).desc())
-        .all()
-    )
-    category_counts = [{"category": c or "Other", "count": n} for c, n in category_rows]
-
+    stats = _dashboard_stats_for_period(db, date_from, date_to)
     return JSONResponse({
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
-        "total_cataracts": total_cataracts,
-        "total_intravitreal": total_intravitreal,
-        "vue_cataract": vue_cataract,
-        "vue_intravitreal": vue_intravitreal,
-        "top_iols": top_iols_list,
-        "category_counts": category_counts,
+        "compare": False,
+        "date_from": stats["date_from"],
+        "date_to": stats["date_to"],
+        "total_cataracts": stats["total_cataracts"],
+        "total_intravitreal": stats["total_intravitreal"],
+        "vue_cataract": stats["vue_cataract"],
+        "vue_intravitreal": stats["vue_intravitreal"],
+        "top_iols": stats["top_iols"],
+        "category_counts": stats["category_counts"],
     })
 
 

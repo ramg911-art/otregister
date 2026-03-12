@@ -108,13 +108,42 @@
     }
     .loading-overlay.hide { display: none; }
     .spinner-border { color: var(--dash-primary); }
+    .compare-section { margin-bottom: 1rem; }
+    .compare-section label { margin: 0; font-weight: 500; color: #475569; }
+    .compare-section .btn-group .btn.active {
+        background: #7c3aed;
+        border-color: #7c3aed;
+        color: #fff;
+    }
+    .compare-tiles .col-period { margin-bottom: 0.5rem; }
+    .compare-tiles .period-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.35rem;
+    }
+    .compare-tiles .tile-value-with-delta { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+    .compare-tiles .delta {
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+    .compare-tiles .delta.up { color: #059669; }
+    .compare-tiles .delta.down { color: #dc2626; }
+    .compare-tiles .delta.flat { color: #64748b; }
+    .compare-tiles .stat-tile .tile-value { font-size: 1.4rem; }
+    #tilesRow.single-mode { display: flex; }
+    #compareTilesRow { display: none; }
+    #compareTilesRow.compare-mode { display: flex; }
+    #tilesRow.compare-mode { display: none; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="dashboard-header">
     <h1>Admin Dashboard</h1>
-    <div class="range-selector">
+    <div class="range-selector flex-wrap">
         <label class="me-2">Period:</label>
         <div class="btn-group btn-group-sm" role="group">
             <button type="button" class="btn btn-outline-primary range-btn active" data-range="mtd">Month to date</button>
@@ -128,6 +157,17 @@
             <input type="date" id="toDate" class="form-control form-control-sm">
             <button type="button" class="btn btn-sm btn-primary" id="applyCustom">Apply</button>
         </div>
+    </div>
+</div>
+
+<div class="compare-section">
+    <label class="me-2">Compare:</label>
+    <div class="btn-group btn-group-sm" role="group">
+        <button type="button" class="btn btn-outline-secondary compare-btn active" data-compare="">Single period</button>
+        <button type="button" class="btn btn-outline-secondary compare-btn" data-compare="month">This month vs Last month</button>
+        <button type="button" class="btn btn-outline-secondary compare-btn" data-compare="quarter">This quarter vs Last quarter</button>
+        <button type="button" class="btn btn-outline-secondary compare-btn" data-compare="6months">Last 6m vs Previous 6m</button>
+        <button type="button" class="btn btn-outline-secondary compare-btn" data-compare="year">This year vs Last year</button>
     </div>
 </div>
 
@@ -160,6 +200,28 @@
     </div>
 </div>
 
+<!-- Compare mode: two columns of tiles -->
+<div class="row g-3 mb-4" id="compareTilesRow">
+    <div class="col-md-6">
+        <div class="period-label" id="compareLabelA">Period A</div>
+        <div class="row g-2 compare-tiles">
+            <div class="col-6"><div class="stat-tile tile-cataract"><div class="tile-label">Cataracts</div><div class="tile-value" id="cmpCatA">–</div></div></div>
+            <div class="col-6"><div class="stat-tile tile-intravitreal"><div class="tile-label">Intravitreal</div><div class="tile-value" id="cmpIntraA">–</div></div></div>
+            <div class="col-6"><div class="stat-tile tile-vue-cat"><div class="tile-label">Vue (Cataract)</div><div class="tile-value" id="cmpVueCatA">–</div></div></div>
+            <div class="col-6"><div class="stat-tile tile-vue-intra"><div class="tile-label">Vue (Intravitreal)</div><div class="tile-value" id="cmpVueIntraA">–</div></div></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="period-label" id="compareLabelB">Period B</div>
+        <div class="row g-2 compare-tiles">
+            <div class="col-6"><div class="stat-tile tile-cataract"><div class="tile-label">Cataracts</div><div class="tile-value-with-delta"><span id="cmpCatB">–</span><span class="delta" id="deltaCat"></span></div></div></div>
+            <div class="col-6"><div class="stat-tile tile-intravitreal"><div class="tile-label">Intravitreal</div><div class="tile-value-with-delta"><span id="cmpIntraB">–</span><span class="delta" id="deltaIntra"></span></div></div></div>
+            <div class="col-6"><div class="stat-tile tile-vue-cat"><div class="tile-label">Vue (Cataract)</div><div class="tile-value-with-delta"><span id="cmpVueCatB">–</span><span class="delta" id="deltaVueCat"></span></div></div></div>
+            <div class="col-6"><div class="stat-tile tile-vue-intra"><div class="tile-label">Vue (Intravitreal)</div><div class="tile-value-with-delta"><span id="cmpVueIntraB">–</span><span class="delta" id="deltaVueIntra"></span></div></div></div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <div class="col-lg-6">
         <div class="chart-card">
@@ -187,21 +249,33 @@
 <script>
 (function() {
     const rangeBtns = document.querySelectorAll('.range-btn');
+    const compareBtns = document.querySelectorAll('.compare-btn');
     const customDates = document.getElementById('customDates');
     const fromDate = document.getElementById('fromDate');
     const toDate = document.getElementById('toDate');
     const applyCustom = document.getElementById('applyCustom');
     const dateRangeLabel = document.getElementById('dateRangeLabel');
+    const tilesRow = document.getElementById('tilesRow');
+    const compareTilesRow = document.getElementById('compareTilesRow');
     const tiles = {
         cataracts: document.getElementById('tileCataracts'),
         intravitreal: document.getElementById('tileIntravitreal'),
         vueCataract: document.getElementById('tileVueCataract'),
         vueIntravitreal: document.getElementById('tileVueIntravitreal'),
     };
+    const cmpTiles = {
+        catA: document.getElementById('cmpCatA'), catB: document.getElementById('cmpCatB'), deltaCat: document.getElementById('deltaCat'),
+        intraA: document.getElementById('cmpIntraA'), intraB: document.getElementById('cmpIntraB'), deltaIntra: document.getElementById('deltaIntra'),
+        vueCatA: document.getElementById('cmpVueCatA'), vueCatB: document.getElementById('cmpVueCatB'), deltaVueCat: document.getElementById('deltaVueCat'),
+        vueIntraA: document.getElementById('cmpVueIntraA'), vueIntraB: document.getElementById('cmpVueIntraB'), deltaVueIntra: document.getElementById('deltaVueIntra'),
+    };
+    const compareLabelA = document.getElementById('compareLabelA');
+    const compareLabelB = document.getElementById('compareLabelB');
     const loadIol = document.getElementById('loadIol');
     const loadCat = document.getElementById('loadCat');
 
     let currentRange = 'mtd';
+    let currentCompare = '';
     let chartIol = null;
     let chartCategory = null;
 
@@ -215,14 +289,147 @@
         loadCat.classList.toggle('hide', !loading);
     }
 
+    function deltaText(a, b) {
+        const diff = b - a;
+        if (diff === 0) return { text: '(same)', cls: 'flat' };
+        const pct = a > 0 ? Math.round((diff / a) * 100) : (b > 0 ? 100 : 0);
+        const sign = diff > 0 ? '+' : '';
+        return { text: sign + diff + (pct !== 0 ? ' (' + sign + pct + '%)' : ''), cls: diff > 0 ? 'up' : 'down' };
+    }
+
     function buildUrl() {
         const params = new URLSearchParams();
-        params.set('range_type', currentRange);
-        if (currentRange === 'custom') {
-            if (fromDate.value) params.set('from_date', fromDate.value);
-            if (toDate.value) params.set('to_date', toDate.value);
+        if (currentCompare) {
+            params.set('compare', currentCompare);
+        } else {
+            params.set('range_type', currentRange);
+            if (currentRange === 'custom') {
+                if (fromDate.value) params.set('from_date', fromDate.value);
+                if (toDate.value) params.set('to_date', toDate.value);
+            }
         }
         return '/admin/dashboard/api/stats?' + params.toString();
+    }
+
+    function renderCompare(data) {
+        const a = data.period_a;
+        const b = data.period_b;
+        compareLabelA.textContent = data.label_a;
+        compareLabelB.textContent = data.label_b;
+        dateRangeLabel.textContent = data.label_a + ' vs ' + data.label_b;
+
+        cmpTiles.catA.textContent = a.total_cataracts;
+        cmpTiles.catB.textContent = b.total_cataracts;
+        let d = deltaText(a.total_cataracts, b.total_cataracts);
+        cmpTiles.deltaCat.textContent = d.text;
+        cmpTiles.deltaCat.className = 'delta ' + d.cls;
+
+        cmpTiles.intraA.textContent = a.total_intravitreal;
+        cmpTiles.intraB.textContent = b.total_intravitreal;
+        d = deltaText(a.total_intravitreal, b.total_intravitreal);
+        cmpTiles.deltaIntra.textContent = d.text;
+        cmpTiles.deltaIntra.className = 'delta ' + d.cls;
+
+        cmpTiles.vueCatA.textContent = a.vue_cataract;
+        cmpTiles.vueCatB.textContent = b.vue_cataract;
+        d = deltaText(a.vue_cataract, b.vue_cataract);
+        cmpTiles.deltaVueCat.textContent = d.text;
+        cmpTiles.deltaVueCat.className = 'delta ' + d.cls;
+
+        cmpTiles.vueIntraA.textContent = a.vue_intravitreal;
+        cmpTiles.vueIntraB.textContent = b.vue_intravitreal;
+        d = deltaText(a.vue_intravitreal, b.vue_intravitreal);
+        cmpTiles.deltaVueIntra.textContent = d.text;
+        cmpTiles.deltaVueIntra.className = 'delta ' + d.cls;
+
+        const iolNames = new Set([...(a.top_iols || []).map(x => x.iol_name), ...(b.top_iols || []).map(x => x.iol_name)]);
+        const labels = Array.from(iolNames).slice(0, 12);
+        const mapA = Object.fromEntries((a.top_iols || []).map(x => [x.iol_name, x.count]));
+        const mapB = Object.fromEntries((b.top_iols || []).map(x => [x.iol_name, x.count]));
+        const dataA = labels.map(n => mapA[n] || 0);
+        const dataB = labels.map(n => mapB[n] || 0);
+
+        if (chartIol) chartIol.destroy();
+        chartIol = new Chart(document.getElementById('chartIol').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: data.label_a, data: dataA, backgroundColor: 'rgba(37, 99, 235, 0.7)', borderColor: 'rgb(37, 99, 235)', borderWidth: 1 },
+                    { label: data.label_b, data: dataB, backgroundColor: 'rgba(124, 58, 237, 0.7)', borderColor: 'rgb(124, 58, 237)', borderWidth: 1 }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: { x: { beginAtZero: true }, y: { ticks: { font: { size: 11 } } } }
+            }
+        });
+
+        const catNames = new Set([...(a.category_counts || []).map(x => x.category), ...(b.category_counts || []).map(x => x.category)]);
+        const catLabels = Array.from(catNames);
+        const catMapA = Object.fromEntries((a.category_counts || []).map(x => [x.category, x.count]));
+        const catMapB = Object.fromEntries((b.category_counts || []).map(x => [x.category, x.count]));
+        const colors = ['#2563eb','#059669','#d97706','#0891b2','#7c3aed','#dc2626'];
+        if (chartCategory) chartCategory.destroy();
+        chartCategory = new Chart(document.getElementById('chartCategory').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: catLabels,
+                datasets: [
+                    { label: data.label_a, data: catLabels.map(n => catMapA[n] || 0), backgroundColor: 'rgba(37, 99, 235, 0.7)', borderColor: 'rgb(37, 99, 235)', borderWidth: 1 },
+                    { label: data.label_b, data: catLabels.map(n => catMapB[n] || 0), backgroundColor: 'rgba(124, 58, 237, 0.7)', borderColor: 'rgb(124, 58, 237)', borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: { x: { stacked: false }, y: { beginAtZero: true } }
+            }
+        });
+    }
+
+    function renderSingle(data) {
+        dateRangeLabel.textContent = formatDate(data.date_from) + ' – ' + formatDate(data.date_to);
+        tiles.cataracts.textContent = data.total_cataracts;
+        tiles.intravitreal.textContent = data.total_intravitreal;
+        tiles.vueCataract.textContent = data.vue_cataract;
+        tiles.vueIntravitreal.textContent = data.vue_intravitreal;
+
+        if (chartIol) chartIol.destroy();
+        chartIol = new Chart(document.getElementById('chartIol').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: (data.top_iols || []).map(x => x.iol_name),
+                datasets: [{ label: 'Cases', data: (data.top_iols || []).map(x => x.count), backgroundColor: 'rgba(37, 99, 235, 0.7)', borderColor: 'rgb(37, 99, 235)', borderWidth: 1 }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } }, y: { ticks: { font: { size: 11 } } } }
+            }
+        });
+
+        if (chartCategory) chartCategory.destroy();
+        const colors = ['#2563eb','#059669','#d97706','#0891b2','#7c3aed','#dc2626'];
+        chartCategory = new Chart(document.getElementById('chartCategory').getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: (data.category_counts || []).map(x => x.category),
+                datasets: [{
+                    data: (data.category_counts || []).map(x => x.count),
+                    backgroundColor: (data.category_counts || []).map((_, i) => colors[i % colors.length]),
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+        });
     }
 
     function fetchStats() {
@@ -230,60 +437,17 @@
         fetch(buildUrl())
             .then(r => r.json())
             .then(data => {
-                dateRangeLabel.textContent = formatDate(data.date_from) + ' – ' + formatDate(data.date_to);
-                tiles.cataracts.textContent = data.total_cataracts;
-                tiles.intravitreal.textContent = data.total_intravitreal;
-                tiles.vueCataract.textContent = data.vue_cataract;
-                tiles.vueIntravitreal.textContent = data.vue_intravitreal;
-
-                if (chartIol) chartIol.destroy();
-                const ctxIol = document.getElementById('chartIol').getContext('2d');
-                chartIol = new Chart(ctxIol, {
-                    type: 'bar',
-                    data: {
-                        labels: (data.top_iols || []).map(x => x.iol_name),
-                        datasets: [{
-                            label: 'Cases',
-                            data: (data.top_iols || []).map(x => x.count),
-                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
-                            borderColor: 'rgb(37, 99, 235)',
-                            borderWidth: 1,
-                        }]
-                    },
-                    options: {
-                        indexAxis: 'y',
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            x: { beginAtZero: true, ticks: { stepSize: 1 } },
-                            y: { ticks: { font: { size: 11 } } }
-                        }
-                    }
-                });
-
-                if (chartCategory) chartCategory.destroy();
-                const ctxCat = document.getElementById('chartCategory').getContext('2d');
-                const colors = ['#2563eb','#059669','#d97706','#0891b2','#7c3aed','#dc2626'];
-                chartCategory = new Chart(ctxCat, {
-                    type: 'doughnut',
-                    data: {
-                        labels: (data.category_counts || []).map(x => x.category),
-                        datasets: [{
-                            data: (data.category_counts || []).map(x => x.count),
-                            backgroundColor: (data.category_counts || []).map((_, i) => colors[i % colors.length]),
-                            borderWidth: 2,
-                            borderColor: '#fff'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'right' }
-                        }
-                    }
-                });
+                if (data.compare) {
+                    tilesRow.classList.add('compare-mode');
+                    tilesRow.classList.remove('single-mode');
+                    compareTilesRow.classList.add('compare-mode');
+                    renderCompare(data);
+                } else {
+                    tilesRow.classList.remove('compare-mode');
+                    tilesRow.classList.add('single-mode');
+                    compareTilesRow.classList.remove('compare-mode');
+                    renderSingle(data);
+                }
                 setLoading(false);
             })
             .catch(() => { setLoading(false); dateRangeLabel.textContent = 'Error loading data'; });
@@ -291,6 +455,7 @@
 
     rangeBtns.forEach(btn => {
         btn.addEventListener('click', function() {
+            if (currentCompare) return;
             rangeBtns.forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             currentRange = this.dataset.range;
@@ -298,7 +463,17 @@
             if (currentRange !== 'custom') fetchStats();
         });
     });
+    compareBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            compareBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentCompare = this.dataset.compare || '';
+            customDates.classList.remove('show');
+            fetchStats();
+        });
+    });
     applyCustom.addEventListener('click', function() {
+        if (currentCompare) return;
         if (fromDate.value && toDate.value && fromDate.value <= toDate.value) fetchStats();
     });
     fetchStats();

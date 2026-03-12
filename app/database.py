@@ -3,26 +3,35 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
 # --------------------------------------------------
-# Database path
+# Database URL
 # --------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
 
-DB_PATH = os.path.join(DATA_DIR, "ot.db")
-DATABASE_URL = f"sqlite:///{DB_PATH}"
-
-# --------------------------------------------------
-# SQLAlchemy engine
-# --------------------------------------------------
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}  # Needed for SQLite
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://otuser:password@localhost/otregister"
 )
+
+# --------------------------------------------------
+# Engine configuration
+# --------------------------------------------------
+
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20
+    )
 
 # --------------------------------------------------
 # Session
 # --------------------------------------------------
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -32,11 +41,13 @@ SessionLocal = sessionmaker(
 # --------------------------------------------------
 # Base class for models
 # --------------------------------------------------
+
 Base = declarative_base()
 
 # --------------------------------------------------
 # Dependency for FastAPI
 # --------------------------------------------------
+
 def get_db():
     db = SessionLocal()
     try:

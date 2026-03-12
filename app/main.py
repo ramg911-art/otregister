@@ -394,6 +394,7 @@ from app.models import User
 from app.auth import require_admin
 from app.auth import hash_password, verify_password
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from urllib.parse import quote
 
 @app.get("/admin/users")
@@ -447,9 +448,30 @@ async def create_user(
     db.add(user)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        # User might have been created by a previous request (e.g. double-submit or replica lag)
+        err_msg = str(e).lower()
+        # After SQLite→PostgreSQL migration, the users.id sequence is often broken:
+        # next id is 1 or 2 but those rows already exist → duplicate key on PRIMARY KEY, not username.
+        # The row is never inserted, so the new user never appears in the list.
+        if "users_pkey" in err_msg:
+            try:
+                db.execute(text(
+                    "SELECT setval(pg_get_serial_sequence('users', 'id'), "
+                    "(SELECT COALESCE(MAX(id), 0) + 1 FROM users))"
+                ))
+                db.commit()
+                user2 = User(
+                    username=username,
+                    password_hash=hash_password(password),
+                    role=role if role in ("staff", "admin") else "staff",
+                )
+                db.add(user2)
+                db.commit()
+                return RedirectResponse("/admin/users?created=1", status_code=303)
+            except Exception:
+                db.rollback()
+        # Real username duplicate, or sequence fix failed
         existing = db.query(User).filter(User.username == username).first()
         if existing:
             return RedirectResponse(

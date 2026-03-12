@@ -14,9 +14,15 @@
 
     <h4>User Management</h4>
 
+    {% if created %}
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        User created successfully.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     {% if error == 'duplicate' %}
     <div class="alert alert-warning alert-dismissible fade show" role="alert">
-        That username already exists. Choose a different username.
+        A user with that username already exists (check is case-insensitive: e.g. &quot;Admin&quot; and &quot;admin&quot; are the same). Choose a different username.
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% elif error == 'missing' %}

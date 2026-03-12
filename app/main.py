@@ -403,6 +403,7 @@ def user_management(
 ):
     users = db.query(User).all()
     error = request.query_params.get("error")
+    created = request.query_params.get("created")
     return templates.TemplateResponse(
         "admin_users.html",
         {
@@ -410,6 +411,7 @@ def user_management(
             "users": users,
             "current_user": admin,
             "error": error,
+            "created": created,
         },
     )
 
@@ -420,6 +422,7 @@ async def create_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    from sqlalchemy import func
     form = await request.form()
     username = (form.get("username") or "").strip()
     password = form.get("password") or ""
@@ -428,6 +431,16 @@ async def create_user(
     if not username or not password:
         return RedirectResponse(
             "/admin/users?error=missing",
+            status_code=303,
+        )
+
+    # Case-insensitive duplicate check (so "Admin" vs "admin" is treated as same)
+    existing = db.query(User).filter(
+        func.lower(User.username) == username.lower()
+    ).first()
+    if existing:
+        return RedirectResponse(
+            "/admin/users?error=duplicate",
             status_code=303,
         )
 
@@ -446,7 +459,7 @@ async def create_user(
             status_code=303,
         )
 
-    return RedirectResponse("/admin/users", status_code=303)
+    return RedirectResponse("/admin/users?created=1", status_code=303)
 
 @app.post("/admin/users/{user_id}/delete")
 def delete_user(

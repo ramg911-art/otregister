@@ -7,7 +7,7 @@ from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import engine, get_db
+from app.database import engine, get_db, fix_postgres_sequence, SessionLocal
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
@@ -23,6 +23,7 @@ from datetime import date, datetime
 from collections import defaultdict
 from fastapi import APIRouter
 from app.models import Base, OTRegister, IOLMaster, IntravitrealDrugMaster
+from sqlalchemy.exc import IntegrityError
 
 Base.metadata.create_all(bind=engine)
 
@@ -40,7 +41,20 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 
-
+# Fix PostgreSQL sequences once at startup (after SQLite→PG migration)
+try:
+    if not (engine.url.drivername == "sqlite"):
+        _db = SessionLocal()
+        try:
+            for _t in ("users", "ot_register", "iol_master", "intravitreal_drug_master"):
+                fix_postgres_sequence(_db, _t)
+            _db.commit()
+        except Exception:
+            _db.rollback()
+        finally:
+            _db.close()
+except Exception:
+    pass
 
 # --------------------------------------------------
 # Static & templates
@@ -252,11 +266,34 @@ async def save_ot(
         iol_id=int(form.get("iol_id")) if form.get("iol_id") else None,
         is_vue=bool(form.get("is_vue")),
         intravitreal_drug_id=intravitreal_drug_id,
-        date_of_surgery=datetime.strptime(date_str, "%Y-%m-%d").date(),  # ✅ FIX
+        date_of_surgery=datetime.strptime(date_str, "%Y-%m-%d").date(),
     )
 
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        err_msg = str(e).lower()
+        if "ot_register_pkey" in err_msg:
+            fix_postgres_sequence(db, "ot_register")
+            db.commit()
+            record2 = OTRegister(
+                patient_uhid=form.get("patient_uhid"),
+                patient_name=form.get("patient_name"),
+                surgery=form.get("surgery"),
+                category=form.get("category"),
+                surgeon_name=form.get("surgeon_name"),
+                eye=form.get("eye"),
+                iol_id=int(form.get("iol_id")) if form.get("iol_id") else None,
+                is_vue=bool(form.get("is_vue")),
+                intravitreal_drug_id=intravitreal_drug_id,
+                date_of_surgery=datetime.strptime(date_str, "%Y-%m-%d").date(),
+            )
+            db.add(record2)
+            db.commit()
+        else:
+            raise
 
     return RedirectResponse("/dashboard", status_code=303)
 # --------------------------------------------------
@@ -334,12 +371,22 @@ def add_iol(
         return RedirectResponse("/login", status_code=302)
 
     iol = IOLMaster(
-    iol_name=name.strip(),
-    package=package.strip()
-)
-
+        iol_name=name.strip(),
+        package=package.strip(),
+    )
     db.add(iol)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        if "iol_master_pkey" in str(e).lower():
+            fix_postgres_sequence(db, "iol_master")
+            db.commit()
+            iol2 = IOLMaster(iol_name=name.strip(), package=package.strip())
+            db.add(iol2)
+            db.commit()
+        else:
+            raise
 
     return RedirectResponse("/iol", status_code=302)
 # ----------------------------
@@ -408,6 +455,15 @@ def user_management(
     created = request.query_params.get("created")
     already_created = request.query_params.get("already_created")
     tried_username = request.query_params.get("tried", "")
+    constraint_hint = request.query_params.get("constraint", "")
+    db_users_at_error = request.query_params.get("db_users", "")
+    # Show which DB we're connected to (help debug otregister vs tregister)
+    db_name = None
+    try:
+        r = db.execute(text("SELECT current_database()"))
+        db_name = r.scalar()
+    except Exception:
+        pass
     return templates.TemplateResponse(
         "admin_users.html",
         {
@@ -418,6 +474,9 @@ def user_management(
             "created": created,
             "already_created": already_created,
             "tried_username": tried_username,
+            "constraint_hint": constraint_hint,
+            "db_users_at_error": db_users_at_error,
+            "db_name": db_name,
         },
     )
 
@@ -471,15 +530,40 @@ async def create_user(
                 return RedirectResponse("/admin/users?created=1", status_code=303)
             except Exception:
                 db.rollback()
-        # Real username duplicate, or sequence fix failed
+        # Real username duplicate (or unique on LOWER(username) in DB)
         existing = db.query(User).filter(User.username == username).first()
+        if not existing:
+            from sqlalchemy import func
+            existing = db.query(User).filter(
+                func.lower(User.username) == username.lower()
+            ).first()
         if existing:
             return RedirectResponse(
                 f"/admin/users?already_created=1&tried={quote(username)}",
                 status_code=303,
             )
+        # Duplicate error but no row found with this username — show constraint and DB state for debugging
+        constraint_hint = ""
+        if hasattr(e, "orig") and e.orig is not None:
+            try:
+                if hasattr(e.orig, "diag") and e.orig.diag is not None:
+                    constraint_hint = getattr(e.orig.diag, "constraint_name", "") or ""
+            except Exception:
+                pass
+            if not constraint_hint:
+                constraint_hint = str(e.orig)[:80]
+        try:
+            rows = db.execute(text("SELECT username FROM users ORDER BY id")).fetchall()
+            db_usernames = ",".join(r[0] for r in rows) if rows else ""
+        except Exception:
+            db_usernames = ""
+        params = f"error=duplicate&tried={quote(username)}"
+        if constraint_hint:
+            params += f"&constraint={quote(constraint_hint[:60])}"
+        if db_usernames:
+            params += f"&db_users={quote(db_usernames[:200])}"
         return RedirectResponse(
-            f"/admin/users?error=duplicate&tried={quote(username)}",
+            f"/admin/users?{params}",
             status_code=303,
         )
 

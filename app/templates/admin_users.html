@@ -13,6 +13,9 @@
 <div class="container mt-4">
 
     <h4>User Management</h4>
+    {% if db_name %}
+    <p class="text-muted small mb-2">Database: <code>{{ db_name }}</code> — ensure your <code>DATABASE_URL</code> uses this database.</p>
+    {% endif %}
 
     {% if created %}
     <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -33,6 +36,12 @@
         You entered: <code>{{ tried_username }}</code>
         {% endif %}
         Existing usernames: <code>{% for u in users %}{{ u.username }}{% if not loop.last %}, {% endif %}{% endfor %}</code>.
+        {% if constraint_hint %}
+        <br><small>Constraint that failed: <code>{{ constraint_hint }}</code></small>
+        {% endif %}
+        {% if db_users_at_error %}
+        <br><small>Usernames in DB at time of error: <code>{{ db_users_at_error }}</code></small>
+        {% endif %}
         Choose a different username.
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>

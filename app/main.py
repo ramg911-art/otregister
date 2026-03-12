@@ -405,6 +405,7 @@ def user_management(
     users = db.query(User).all()
     error = request.query_params.get("error")
     created = request.query_params.get("created")
+    already_created = request.query_params.get("already_created")
     tried_username = request.query_params.get("tried", "")
     return templates.TemplateResponse(
         "admin_users.html",
@@ -414,6 +415,7 @@ def user_management(
             "current_user": admin,
             "error": error,
             "created": created,
+            "already_created": already_created,
             "tried_username": tried_username,
         },
     )
@@ -447,6 +449,13 @@ async def create_user(
         db.commit()
     except IntegrityError:
         db.rollback()
+        # User might have been created by a previous request (e.g. double-submit or replica lag)
+        existing = db.query(User).filter(User.username == username).first()
+        if existing:
+            return RedirectResponse(
+                f"/admin/users?already_created=1&tried={quote(username)}",
+                status_code=303,
+            )
         return RedirectResponse(
             f"/admin/users?error=duplicate&tried={quote(username)}",
             status_code=303,

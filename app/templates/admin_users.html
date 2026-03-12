@@ -20,6 +20,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if already_created and tried_username %}
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        <strong>User &quot;{{ tried_username }}&quot; already exists.</strong> They were created earlier (e.g. from a previous click). Check the list below — you can log in as <strong>{{ tried_username }}</strong> or use Reset Password if needed.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     {% if error == 'duplicate' %}
     <div class="alert alert-warning alert-dismissible fade show" role="alert">
         <strong>Username already in use.</strong>

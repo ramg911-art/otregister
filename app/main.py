@@ -7,7 +7,7 @@ from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import engine, get_db, fix_postgres_sequence, SessionLocal
+from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, SessionLocal
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
@@ -41,13 +41,14 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 
-# Fix PostgreSQL sequences once at startup (after SQLite→PG migration)
+# Fix PostgreSQL id defaults and sequences at startup (after SQLite→PG migration)
+# Fixes "null value in column id violates not-null" and duplicate key on id
 try:
     if not (engine.url.drivername == "sqlite"):
         _db = SessionLocal()
         try:
             for _t in ("users", "ot_register", "iol_master", "intravitreal_drug_master"):
-                fix_postgres_sequence(_db, _t)
+                ensure_postgres_id_default(_db, _t)
             _db.commit()
         except Exception:
             _db.rollback()

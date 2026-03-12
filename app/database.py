@@ -77,3 +77,26 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
         db.execute(text(sql), {"t": table_name, "c": id_column})
     except Exception:
         pass
+
+
+def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
+    """
+    Ensure the id column has DEFAULT nextval(...) so INSERTs get an id.
+    Fixes 'null value in column "id" violates not-null constraint' after pgloader migration.
+    """
+    if db.get_bind().url.drivername == "sqlite":
+        return
+    from sqlalchemy import text
+    allowed = ("users", "ot_register", "iol_master", "intravitreal_drug_master")
+    if table_name not in allowed:
+        return
+    seq_name = table_name + "_" + id_column + "_seq"
+    try:
+        db.execute(text("CREATE SEQUENCE IF NOT EXISTS " + seq_name))
+        db.execute(text(
+            "ALTER TABLE " + table_name + " ALTER COLUMN " + id_column
+            + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
+        ))
+        fix_postgres_sequence(db, table_name, id_column)
+    except Exception:
+        pass

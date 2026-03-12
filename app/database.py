@@ -2,6 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
+# Load .env from project root so DATABASE_URL and TELEGRAM_* are available
+from dotenv import load_dotenv
+_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_base_dir, ".env"))
+
 # --------------------------------------------------
 # Database URL
 # --------------------------------------------------

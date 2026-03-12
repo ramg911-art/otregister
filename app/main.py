@@ -1037,13 +1037,16 @@ from sqlalchemy import func
 from app.database import SessionLocal
 
 # ----------------------------
-# CONFIGURATION (from .env)
+# CONFIGURATION (from .env – loaded in app.database)
 # ----------------------------
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-SURGEON_CHAT_ID = None  # set from TELEGRAM_CHAT_ID
-_tid = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-if _tid.isdigit():
-    SURGEON_CHAT_ID = int(_tid)
+TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+SURGEON_CHAT_ID = None
+_tid = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+if _tid:
+    try:
+        SURGEON_CHAT_ID = int(_tid)
+    except ValueError:
+        pass
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
 # ------------------------------------------------------------
 # SEND MESSAGE
@@ -1728,10 +1731,10 @@ def get_month_summary(db, month, year, label):
 # ============================================================
 def telegram_polling_loop():
     if not TELEGRAM_API or SURGEON_CHAT_ID is None:
-        print("⚠️ Telegram bot disabled: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
+        print("⚠️ Telegram bot disabled: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env (in project root)")
         return
     offset = None
-    print("✅ Telegram polling ACTIVE")
+    print("✅ Telegram polling ACTIVE (chat_id=%s)" % SURGEON_CHAT_ID)
 
     while True:
         try:

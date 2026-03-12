@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard – OT Register{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-end">
+        <b>OT List</b>
+
+        <form method="get" class="d-flex gap-2 align-items-end">
+            <div>
+                <label class="form-label mb-0">Select Date</label>
+                <input
+                    type="date"
+                    name="selected_date"
+                    class="form-control"
+                    value="{{ selected_date }}"
+                >
+            </div>
+            <button class="btn btn-primary btn-sm">View</button>
+        </form>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm mb-0 align-middle">
+            <thead class="table-light">
+            <tr>
+                <th>#</th>
+                <th>Date</th>
+                <th>UHID</th>
+                <th>Patient</th>
+                <th>Eye</th>
+                <th>Surgery</th>
+                <th>IOL</th>
+                <th>Surgeon</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in records %}
+            <tr
+                oncontextmenu="showContextMenu(event, {{ r.id }})"
+                style="cursor:context-menu;"
+            >
+                <td>{{ loop.index }}</td>
+                <td>{{ r.date_of_surgery.strftime('%d/%m/%Y') }}</td>
+                <td>{{ r.patient_uhid }}</td>
+                <td>{{ r.patient_name }}</td>
+                <td>{{ r.eye }}</td>
+                <td>{{ r.surgery }}</td>
+                <td>{{ r.iol.iol_name if r.iol else '' }}</td>
+                <td>{{ r.surgeon_name }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8" class="text-center text-muted">
+                    No OT entries
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ============================= -->
+<!-- RIGHT CLICK CONTEXT MENU -->
+<!-- ============================= -->
+<div id="rowContextMenu"
+     style="
+        display:none;
+        position:fixed;
+        z-index:9999;
+        background:white;
+        border:1px solid #ccc;
+        border-radius:6px;
+        min-width:140px;
+        box-shadow:0 4px 12px rgba(0,0,0,.15);
+     ">
+    <div class="list-group list-group-flush">
+        <a href="#" id="ctxEdit"
+           class="list-group-item list-group-item-action">
+            Edit
+        </a>
+
+        <form id="ctxDeleteForm" method="post" style="margin:0;">
+            <button type="submit"
+                    class="list-group-item list-group-item-action text-danger"
+                    onclick="return confirm('Delete this OT entry?');">
+                Delete
+            </button>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showContextMenu(event, otId) {
+    event.preventDefault();
+
+    const menu = document.getElementById("rowContextMenu");
+    const editLink = document.getElementById("ctxEdit");
+    const deleteForm = document.getElementById("ctxDeleteForm");
+
+    editLink.href = `/ot/${otId}/edit`;
+    deleteForm.action = `/ot/${otId}/delete?selected_date={{ selected_date }}`;
+
+    menu.style.top = event.clientY + "px";
+    menu.style.left = event.clientX + "px";
+    menu.style.display = "block";
+}
+
+// Hide menu on left click or scroll
+document.addEventListener("click", () => {
+    document.getElementById("rowContextMenu").style.display = "none";
+});
+document.addEventListener("scroll", () => {
+    document.getElementById("rowContextMenu").style.display = "none";
+});
+</script>
+{% endblock %}

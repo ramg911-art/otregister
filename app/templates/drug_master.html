@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Intravitreal Drug Master{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <b>Intravitreal Drug Master</b>
+    </div>
+
+    <div class="card-body">
+
+        <!-- Add Drug -->
+        <form method="post" action="/admin/drugs/add" class="row g-2 mb-3">
+            <div class="col-md-6">
+                <input
+                    type="text"
+                    name="drug_name"
+                    class="form-control"
+                    placeholder="Enter drug name"
+                    required
+                >
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary btn-sm">
+                    Add Drug
+                </button>
+            </div>
+        </form>
+
+        <!-- Drug List -->
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Drug Name</th>
+                    <th style="width:120px;">Action</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for d in drugs %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ d.drug_name }}</td>
+                    <td>
+                        <form method="post"
+                              action="/admin/drugs/{{ d.id }}/delete"
+                              onsubmit="return confirm('Delete this drug?');">
+                            <button class="btn btn-sm btn-outline-danger">
+                                Delete
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3"
+                        class="text-center text-muted">
+                        No drugs added
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}

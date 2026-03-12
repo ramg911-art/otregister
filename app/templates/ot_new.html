@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}Post new casey{% endblock %}
+
+{% block head %}
+<style>
+    .card {
+        border-radius: 10px;
+    }
+
+    #patient_results {
+        max-height: 220px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Post New Case</h5>
+            </div>
+
+            <div class="card-body">
+
+                <form method="post" action="/ot/save">
+
+                    <!-- ========================= -->
+                    <!-- Patient Search -->
+                    <!-- ========================= -->
+                    <div class="mb-3 position-relative">
+                        <label class="form-label">Search Patient (UHID / Name)</label>
+
+                        <input
+                            type="text"
+                            id="patient_search"
+                            name="patient_uhid"
+                            class="form-control"
+                            placeholder="Type UHID or patient name"
+                            autocomplete="off"
+                            required
+                        >
+
+                        <div
+                            id="patient_results"
+                            class="list-group position-absolute w-100"
+                            style="z-index: 1000;"
+                        ></div>
+                    </div>
+
+                    <input type="hidden" name="patient_id" id="patient_id">
+
+                    <!-- Patient Name -->
+                    <div class="mb-3">
+                        <label class="form-label">Patient Name</label>
+                        <input
+                            type="text"
+                            id="patient_name"
+                            name="patient_name"
+                            class="form-control"
+                            readonly
+                            required
+                        >
+                    </div>
+
+                    <!-- Date -->
+                    <div class="mb-3">
+                        <label class="form-label">Date of Surgery</label>
+                        <input
+                            type="date"
+                            name="date_of_surgery"
+                            class="form-control"
+                            required
+                        >
+                    </div>
+
+                    <!-- Eye -->
+                    <div class="mb-3">
+                        <label class="form-label">Eye</label>
+                        <select name="eye" class="form-select" required>
+                            <option value="">-- Select Eye --</option>
+                            <option value="Right">Right Eye</option>
+                            <option value="Left">Left Eye</option>
+                        </select>
+                    </div>
+
+                    <!-- Surgeon -->
+                    <div class="mb-3">
+                        <label class="form-label">Surgeon Name</label>
+                        <input
+                            type="text"
+                            name="surgeon_name"
+                            class="form-control"
+                            value="Dr Poornima"
+                            required
+                        >
+                    </div>
+
+                    <!-- Surgery -->
+                    <div class="mb-3">
+                        <label class="form-label">Surgery</label>
+                        <select name="surgery" class="form-select" required id="surgery_select">
+                            <option value="Cataract" selected>Cataract</option>
+                            <option value="Pterygium">Pterygium</option>
+                            <option value="Intravitreal Injection">Intravitreal Injection</option>
+                            <option value="Minor">Minor</option>
+                        </select>
+                    </div>
+
+                    <!-- Category -->
+                    <div class="mb-3">
+                        <label class="form-label">Patient Category</label>
+                        <select name="category" class="form-select" required>
+                            <option value="General">General</option>
+                            <option value="ECHS">ECHS</option>
+                            <option value="PMJAY">PMJAY</option>
+                            <option value="MEDISEP">MEDISEP</option>
+                            <option value="Insurance">Insurance</option>
+                            <option value="VSSC">VSSC</option>
+                            <option value="FCI">FCI</option>
+                        </select>
+                    </div>
+
+                    <!-- IOL -->
+                    <div class="mb-4">
+                        <label class="form-label">IOL</label>
+                        <select name="iol_id" class="form-select" required id="iol_select">
+                            {% for iol in iols %}
+                                <option value="{{ iol.id }}">
+                                    {{ iol.iol_name }} 
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input
+                            type="checkbox"
+                            class="form-check-input"
+                            id="is_vue"
+                            name="is_vue"
+                            value="1"
+                        >
+                        <label class="form-check-label" for="is_vue">
+                            Vue (Referral Centre)
+                        </label>
+                    </div>
+
+                   <div class="mb-4">
+                    <label class="form-label">Intravitreal Drug</label>
+                    <select
+                        name="intravitreal_drug_id"
+                        class="form-select"
+                        id="drug_select"
+                        disabled
+                    >
+                        <option value="">-- Select Drug --</option>
+                        {% for d in drugs %}
+                            <option value="{{ d.id }}">
+                                {{ d.drug_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                    <!-- Submit -->
+                    <div class="d-flex justify-content-between">
+                        <a href="/dashboard" class="btn btn-outline-secondary">
+                            Back
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            Save OT Entry
+                        </button>
+                    </div>
+
+                </form>
+
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let debounceTimer = null;
+
+const searchInput = document.getElementById("patient_search");
+const resultsBox = document.getElementById("patient_results");
+
+searchInput.addEventListener("input", function () {
+    clearTimeout(debounceTimer);
+
+    const query = this.value.trim();
+    resultsBox.innerHTML = "";
+
+    if (query.length < 2) return;
+
+    debounceTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`/api/patient/search?q=${encodeURIComponent(query)}`);
+            const data = await res.json();
+
+            resultsBox.innerHTML = "";
+
+            if (!Array.isArray(data)) return;
+
+            data.forEach(p => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "list-group-item list-group-item-action";
+                btn.textContent = p.label;
+
+                btn.onclick = () => {
+                    searchInput.value = p.uhid || p.label;
+                    document.getElementById("patient_id").value = p.patient_id || "";
+                    document.getElementById("patient_name").value = p.name || "";
+                    resultsBox.innerHTML = "";
+                };
+
+                resultsBox.appendChild(btn);
+            });
+        } catch (err) {
+            console.error(err);
+        }
+    }, 300);
+});
+</script>
+<script>
+const surgerySelect = document.getElementById("surgery_select");
+const iolSelect = document.getElementById("iol_select");
+const drugSelect = document.getElementById("drug_select");
+
+function toggleProcedureFields() {
+    const surgery = surgerySelect.value;
+
+    // Default: disable both
+    iolSelect.disabled = true;
+    iolSelect.required = false;
+    iolSelect.value = "";
+
+    drugSelect.disabled = true;
+    drugSelect.required = false;
+    drugSelect.value = "";
+
+    if (surgery === "Cataract") {
+        iolSelect.disabled = false;
+        iolSelect.required = true;
+    }
+
+    if (surgery === "Intravitreal Injection") {
+        drugSelect.disabled = false;
+        drugSelect.required = true;
+    }
+}
+
+// Run on load + change
+toggleProcedureFields();
+surgerySelect.addEventListener("change", toggleProcedureFields);
+</script>   
+
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Surgery List Report{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+
+    <!-- ===================== -->
+    <!-- Header -->
+    <!-- ===================== -->
+    <div class="card-header bg-white">
+        <h5 class="mb-0">Surgery List Report</h5>
+    </div>
+
+    <div class="card-body">
+
+        <!-- ===================== -->
+        <!-- Filters -->
+        <!-- ===================== -->
+        <form method="get" class="row g-3 mb-4">
+
+            <div class="col-md-3">
+                <label class="form-label">From Date</label>
+                <input
+                    type="date"
+                    name="from_date"
+                    value="{{ from_date }}"
+                    class="form-control"
+                    required
+                >
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">To Date</label>
+                <input
+                    type="date"
+                    name="to_date"
+                    value="{{ to_date }}"
+                    class="form-control"
+                    required
+                >
+            </div>
+
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button class="btn btn-primary">
+                    View
+                </button>
+
+                {% if records %}
+                    <a
+                        href="/reports/surgery/excel?from_date={{ from_date }}&to_date={{ to_date }}"
+                        class="btn btn-success btn-sm"
+                    >
+                        Excel
+                    </a>
+
+                    <a
+                        href="/reports/surgery/pdf?from_date={{ from_date }}&to_date={{ to_date }}"
+                        class="btn btn-danger btn-sm"
+                    >
+                        PDF
+                    </a>
+                {% endif %}
+            </div>
+
+        </form>
+
+        <!-- ===================== -->
+        <!-- MAIN TABLE -->
+        <!-- ===================== -->
+        <div class="table-responsive mb-4">
+
+            <table class="table table-bordered table-striped table-sm align-middle">
+
+                <thead class="table-light">
+                    <tr>
+                        <th>Sl No</th>
+                        <th>Date</th>
+                        <th>UHID</th>
+                        <th>Patient Name</th>
+                        <th>Eye</th>
+                        <th>Category</th>
+                        <th>IOL</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ r.date_of_surgery.strftime("%d/%m/%Y") }}</td>
+                        <td>{{ r.patient_uhid }}</td>
+                        <td>{{ r.patient_name }}</td>
+                        <td>{{ r.eye }}</td>
+                        <td>{{ r.category }}</td>
+                        <td>
+                            {% if r.iol %}
+                                {{ r.iol.iol_name }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">
+                            No records found
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+            </table>
+
+        </div>
+
+        <!-- ===================== -->
+        <!-- TOTALS -->
+        <!-- ===================== -->
+        <div class="row">
+
+            <!-- Category Totals -->
+            <div class="col-md-6">
+                <h6>Totals by Category</h6>
+                <table class="table table-bordered table-sm">
+                    {% for cat, count in category_totals.items() %}
+                    <tr>
+                        <td>{{ cat }}</td>
+                        <td class="text-end">{{ count }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+
+            <!-- IOL Totals -->
+            <div class="col-md-6">
+                <h6>Totals by IOL</h6>
+                <table class="table table-bordered table-sm">
+                    {% for iol, count in iol_totals.items() %}
+                    <tr>
+                        <td>{{ iol }}</td>
+                        <td class="text-end">{{ count }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}

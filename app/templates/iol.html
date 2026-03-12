@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}IOL Master{% endblock %}
+
+{% block content %}
+
+<div class="container mt-4 mb-5">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>IOL Master</h4>
+        <a href="/dashboard" class="btn btn-outline-secondary btn-sm">
+            Back
+        </a>
+    </div>
+
+    <!-- ===================== -->
+    <!-- ADD IOL -->
+    <!-- ===================== -->
+    {% if current_user.role == "admin" %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="post" action="/iol/add" class="row g-3">
+
+                <div class="col-md-5">
+                    <label class="form-label">IOL Name</label>
+                    <input
+                        type="text"
+                        name="name"
+                        class="form-control"
+                        placeholder="Enter IOL Name"
+                        required
+                    >
+                </div>
+
+                <div class="col-md-5">
+                    <label class="form-label">Package</label>
+                    <input
+                        type="text"
+                        name="package"
+                        class="form-control"
+                        placeholder="Enter Package Cost"
+                        required
+                    >
+                </div>
+
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">
+                        Add IOL
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ===================== -->
+    <!-- IOL LIST -->
+    <!-- ===================== -->
+    <div class="card">
+        <div class="card-body p-0">
+
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>IOL Name</th>
+                        <th>Package</th>
+                        {% if current_user.role == "admin" %}
+                        <th width="260">Action</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for iol in iols %}
+                    <tr>
+                        <td>{{ iol.iol_name }}</td>
+                        <td>{{ iol.package }}</td>
+
+                        {% if current_user.role == "admin" %}
+                        <td>
+                            <!-- EDIT -->
+                            <form method="post"
+                                  action="/iol/{{ iol.id }}/edit"
+                                  class="d-flex gap-1 mb-1">
+
+                                <input
+                                    class="form-control form-control-sm"
+                                    name="name"
+                                    value="{{ iol.iol_name }}"
+                                    required
+                                >
+
+                                <input
+                                    class="form-control form-control-sm"
+                                    name="package"
+                                    value="{{ iol.package }}"
+                                    required
+                                >
+
+                                <button class="btn btn-sm btn-primary">
+                                    Save
+                                </button>
+                            </form>
+
+                            <!-- DELETE -->
+                            <form method="post"
+                                  action="/iol/{{ iol.id }}/delete"
+                                  onsubmit="return confirm('Delete this IOL?');">
+                                <button class="btn btn-sm btn-danger w-100">
+                                    Delete
+                                </button>
+                            </form>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="3" class="text-center text-muted py-3">
+                            No IOLs found
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

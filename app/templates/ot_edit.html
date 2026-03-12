@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Edit OT Case{% endblock %}
+
+{% block head %}
+<style>
+    .card {
+        border-radius: 10px;
+    }
+
+    #patient_results {
+        max-height: 220px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Edit OT Case</h5>
+            </div>
+
+            <div class="card-body">
+
+                <form method="post" action="/ot/{{ record.id }}/update">
+
+                    <!-- ========================= -->
+                    <!-- Patient Search -->
+                    <!-- ========================= -->
+                    <div class="mb-3 position-relative">
+                        <label class="form-label">Search Patient (UHID / Name)</label>
+
+                        <input
+                            type="text"
+                            id="patient_search"
+                            name="patient_uhid"
+                            class="form-control"
+                            value="{{ record.patient_uhid }}"
+                            placeholder="Type UHID or patient name"
+                            autocomplete="off"
+                            required
+                        >
+
+                        <div
+                            id="patient_results"
+                            class="list-group position-absolute w-100"
+                            style="z-index: 1000;"
+                        ></div>
+                    </div>
+
+                    <input
+                        type="hidden"
+                        name="patient_id"
+                        id="patient_id"
+                        value="{{ record.patient_id if record.patient_id else '' }}"
+                    >
+
+                    <!-- Patient Name -->
+                    <div class="mb-3">
+                        <label class="form-label">Patient Name</label>
+                        <input
+                            type="text"
+                            id="patient_name"
+                            name="patient_name"
+                            class="form-control"
+                            value="{{ record.patient_name }}"
+                            readonly
+                            required
+                        >
+                    </div>
+
+                    <!-- Date -->
+                    <div class="mb-3">
+                        <label class="form-label">Date of Surgery</label>
+                        <input
+                            type="date"
+                            name="date_of_surgery"
+                            class="form-control"
+                            value="{{ record.date_of_surgery.strftime('%Y-%m-%d') }}"
+                            required
+                        >
+                    </div>
+
+                    <!-- Eye -->
+                    <div class="mb-3">
+                        <label class="form-label">Eye</label>
+                        <select name="eye" class="form-select" required>
+                            <option value="">-- Select Eye --</option>
+                            <option value="Right" {% if record.eye == "Right" %}selected{% endif %}>
+                                Right Eye
+                            </option>
+                            <option value="Left" {% if record.eye == "Left" %}selected{% endif %}>
+                                Left Eye
+                            </option>
+                        </select>
+                    </div>
+
+                    <!-- Surgeon -->
+                    <div class="mb-3">
+                        <label class="form-label">Surgeon Name</label>
+                        <input
+                            type="text"
+                            name="surgeon_name"
+                            class="form-control"
+                            value="{{ record.surgeon_name }}"
+                            required
+                        >
+                    </div>
+
+                    <!-- Surgery -->
+                    <div class="mb-3">
+                        <label class="form-label">Surgery</label>
+                        <select name="surgery" class="form-select" required>
+                            <option value="Cataract" {% if record.surgery == "Cataract" %}selected{% endif %}>
+                                Cataract
+                            </option>
+                            <option value="Pterygium" {% if record.surgery == "Pterygium" %}selected{% endif %}>
+                                Pterygium
+                            </option>
+                            <option value="Intravitreal Injection"
+                                {% if record.surgery == "Intravitreal Injection" %}selected{% endif %}>
+                                Intravitreal Injection
+                            </option>
+                            <option value="Minor" {% if record.surgery == "Minor" %}selected{% endif %}>
+                                Minor
+                            </option>
+                        </select>
+                    </div>
+
+                    <!-- Category -->
+                    <div class="mb-3">
+                        <label class="form-label">Patient Category</label>
+                        <select name="category" class="form-select" required>
+                            <option value="General" {% if record.category == "General" %}selected{% endif %}>General</option>
+                            <option value="ECHS" {% if record.category == "ECHS" %}selected{% endif %}>ECHS</option>
+                            <option value="PMJAY" {% if record.category == "PMJAY" %}selected{% endif %}>PMJAY</option>
+                            <option value="MEDISEP" {% if record.category == "MEDISEP" %}selected{% endif %}>MEDISEP</option>
+                            <option value="Insurance" {% if record.category == "Insurance" %}selected{% endif %}>Insurance</option>
+                            <option value="FCI" {% if record.category == "FCI" %}selected{% endif %}>FCI</option>
+                        </select>
+                    </div>
+
+                    <!-- IOL -->
+                    <div class="mb-4">
+                        <label class="form-label">IOL</label>
+                        <select name="iol_id" class="form-select" required>
+                            {% for iol in iols %}
+                                <option value="{{ iol.id }}"
+                                    {% if record.iol_id == iol.id %}selected{% endif %}>
+                                    {{ iol.iol_name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input
+                            type="checkbox"
+                            class="form-check-input"
+                            id="is_vue"
+                            name="is_vue"
+                            value="1"
+                            {% if record.is_vue %}checked{% endif %}
+                        >
+                        <label class="form-check-label" for="is_vue">
+                            Vue (Referral Centre)
+                        </label>
+                    </div>
+                    <!-- Submit -->
+                    <div class="d-flex justify-content-between">
+                        <a href="/dashboard" class="btn btn-outline-secondary">
+                            Back
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            Update OT Entry
+                        </button>
+                    </div>
+
+                </form>
+
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let debounceTimer = null;
+
+const searchInput = document.getElementById("patient_search");
+const resultsBox = document.getElementById("patient_results");
+
+searchInput.addEventListener("input", function () {
+    clearTimeout(debounceTimer);
+
+    const query = this.value.trim();
+    resultsBox.innerHTML = "";
+
+    if (query.length < 2) return;
+
+    debounceTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`/api/patient/search?q=${encodeURIComponent(query)}`);
+            const data = await res.json();
+
+            resultsBox.innerHTML = "";
+
+            if (!Array.isArray(data)) return;
+
+            data.forEach(p => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "list-group-item list-group-item-action";
+                btn.textContent = p.label;
+
+                btn.onclick = () => {
+                    searchInput.value = p.uhid || p.label;
+                    document.getElementById("patient_id").value = p.patient_id || "";
+                    document.getElementById("patient_name").value = p.name || "";
+                    resultsBox.innerHTML = "";
+                };
+
+                resultsBox.appendChild(btn);
+            });
+        } catch (err) {
+            console.error(err);
+        }
+    }, 300);
+});
+</script>
+{% endblock %}

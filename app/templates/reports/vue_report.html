@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Vue Referral Report{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <b>Vue Referral Report</b>
+    </div>
+
+    <div class="card-body">
+        <form method="get" class="row g-2 mb-3">
+            <div class="col-md-3">
+                <label class="form-label">From Date</label>
+                <input type="date" name="from_date" class="form-control" value="{{ from_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To Date</label>
+                <input type="date" name="to_date" class="form-control" value="{{ to_date }}">
+            </div>
+            <div class="col-md-3 align-self-end">
+                <button type="submit" class="btn btn-primary btn-sm">View</button>
+            </div>
+        </form>
+
+        {% if records %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Sl No</th>
+                        <th>Date of Surgery</th>
+                        <th>Patient Name</th>
+                        <th>IOL</th>
+                        <th>Category</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ r.date_of_surgery.strftime("%d/%m/%Y") }}</td>
+                        <td>{{ r.patient_name }}</td>
+                        <td>{{ r.iol.iol_name if r.iol else "" }}</td>
+                        <td>{{ r.category }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <h6>Category-wise Count</h6>
+                <table class="table table-bordered table-sm">
+                    {% for k, v in category_totals.items() %}
+                    <tr>
+                        <td>{{ k }}</td>
+                        <td class="text-end">{{ v }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+
+            <div class="col-md-6">
+                <h6>IOL-wise Count</h6>
+                <table class="table table-bordered table-sm">
+                    {% for k, v in iol_totals.items() %}
+                    <tr>
+                        <td>{{ k }}</td>
+                        <td class="text-end">{{ v }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+        {% else %}
+            {% if from_date and to_date %}
+            <div class="alert alert-info text-center">
+                No Vue referral cases found for selected period.
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

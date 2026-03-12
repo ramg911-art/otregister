@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}OT Register{% endblock %}</title>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap -->
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+
+    <style>
+    body {
+        background-color: #f5f7fa;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .container-fluid.mt-3 {
+        flex: 1;
+    }
+
+    .navbar-brand {
+        font-weight: 600;
+    }
+</style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+<!-- ===================== -->
+<!-- NAVBAR -->
+<!-- ===================== -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+
+        <a class="navbar-brand" href="/">
+            OT Register
+        </a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarMain">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarMain">
+
+            <!-- Left menu -->
+            <ul class="navbar-nav me-auto">
+
+                {% if current_user %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/dashboard">Dashboard</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/ot/new">Post Case</a>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button"
+                       data-bs-toggle="dropdown">
+                        Reports
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a class="dropdown-item" href="/reports/surgery">
+                                Surgery List
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/reports/vue">
+                                Vue Referral Report
+                            </a>
+                        </li>
+                        <li>
+                          <a class="dropdown-item" href="/reports/category-iol">
+                              Category-wise IOL Report
+                          </a>
+                      </li>
+                      <li>
+                            <a class="dropdown-item" href="/reports/intravitreal">
+                                Intravitreal Injection Report
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                {% endif %}
+
+                {% if current_user and current_user.role == "admin" %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle text-warning" href="#"
+                       role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a class="dropdown-item" href="/admin/users">
+                                User Management
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/iol">
+                                IOL Master
+                            </a>
+                        </li>
+                        <li>
+                         <a class="dropdown-item" href="/admin/drugs">
+                             Intravitreal Drug Master
+                      </a>
+                        </li>
+
+                    </ul>
+                </li>
+                {% endif %}
+
+            </ul>
+
+            <!-- Right menu -->
+            {% if current_user %}
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <span class="navbar-text me-3">
+                        {{ current_user.username }}
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-sm btn-outline-light" href="/logout">
+                        Logout
+                    </a>
+                </li>
+            </ul>
+            {% endif %}
+
+        </div>
+    </div>
+</nav>
+
+<!-- ===================== -->
+<!-- PAGE CONTENT -->
+<!-- ===================== -->
+<div class="container-fluid mt-3">
+    {% block content %}{% endblock %}
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+<!-- ===================== -->
+<!-- FOOTER -->
+<!-- ===================== -->
+<footer class="footer mt-auto py-2 bg-light border-top">
+    <div class="container-fluid text-center">
+        <small class="text-muted">
+           
+            Developed by Dr Ram Gopal 2026 All rights reserved
+        </small>
+    </div>
+</footer>
+</html>

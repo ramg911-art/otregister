@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Intravitreal Injection Report{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <b>Intravitreal Injection Report</b>
+    </div>
+
+    <div class="card-body">
+
+        <!-- ============================= -->
+        <!-- DATE FILTER -->
+        <!-- ============================= -->
+        <form method="get" class="row g-2 mb-3">
+            <div class="col-md-3">
+                <label class="form-label">From Date</label>
+                <input
+                    type="date"
+                    name="from_date"
+                    class="form-control"
+                    value="{{ from_date }}"
+                >
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">To Date</label>
+                <input
+                    type="date"
+                    name="to_date"
+                    class="form-control"
+                    value="{{ to_date }}"
+                >
+            </div>
+
+            <div class="col-md-2 align-self-end">
+                <button class="btn btn-primary btn-sm">
+                    View Report
+                </button>
+            </div>
+        </form>
+
+        <!-- ============================= -->
+        <!-- REPORT TABLE -->
+        <!-- ============================= -->
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>UHID</th>
+                    <th>Patient</th>
+                    <th>Category</th>
+                    <th>Drug</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.date_of_surgery.strftime("%d/%m/%Y") }}</td>
+                    <td>{{ r.patient_uhid }}</td>
+                    <td>
+                        {{ r.patient_name }}
+                        {% if r.is_vue %}
+                            <span class="badge bg-success ms-1">
+                                Vue
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.category }}</td>
+                    <td>
+                        {{ r.intravitreal_drug.drug_name
+                           if r.intravitreal_drug else "-" }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted">
+                        No intravitreal injection cases
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ============================= -->
+        <!-- TOTALS SECTION -->
+        <!-- ============================= -->
+        {% if records %}
+        <hr>
+
+        <div class="row">
+
+            <!-- CATEGORY TOTALS -->
+            <div class="col-md-4">
+                <h6>Category-wise Total</h6>
+                <ul class="list-group list-group-sm">
+                    {% for c, v in category_totals.items() %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        {{ c }}
+                        <span>{{ v }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <!-- DRUG TOTALS -->
+            <div class="col-md-4">
+                <h6>Drug-wise Total</h6>
+                <ul class="list-group list-group-sm">
+                    {% for d, v in drug_totals.items() %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        {{ d }}
+                        <span>{{ v }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <!-- VUE TOTAL -->
+            <div class="col-md-4">
+                <h6>Vue Referrals</h6>
+                <div class="alert alert-success py-2">
+                    Total Vue Cases:
+                    <b>{{ vue_total }}</b>
+                </div>
+            </div>
+
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+{% endblock %}

@@ -425,7 +425,6 @@ async def create_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    from sqlalchemy import func
     form = await request.form()
     username = (form.get("username") or "").strip()
     password = form.get("password") or ""
@@ -437,16 +436,7 @@ async def create_user(
             status_code=303,
         )
 
-    # Case-insensitive duplicate check (so "Admin" vs "admin" is treated as same)
-    existing = db.query(User).filter(
-        func.lower(User.username) == username.lower()
-    ).first()
-    if existing:
-        return RedirectResponse(
-            f"/admin/users?error=duplicate&tried={quote(username)}",
-            status_code=303,
-        )
-
+    # Rely only on DB unique constraint (no pre-check) so migration/collation cannot cause false "duplicate"
     user = User(
         username=username,
         password_hash=hash_password(password),

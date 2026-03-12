@@ -27,7 +27,7 @@
         You entered: <code>{{ tried_username }}</code>
         {% endif %}
         Existing usernames: <code>{% for u in users %}{{ u.username }}{% if not loop.last %}, {% endif %}{% endfor %}</code>.
-        Use a different username (check is case-insensitive).
+        Choose a different username.
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% elif error == 'missing' %}

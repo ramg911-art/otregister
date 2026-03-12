@@ -241,9 +241,6 @@ from app.auth import require_login
 
 from datetime import datetime
 
-@app.post("/ot/save")
-
-
 def _make_ot_record(form):
     date_str = form.get("date_of_surgery")
     if not date_str:
@@ -273,46 +270,57 @@ async def save_ot(
     user_id: int = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    form = await request.form()
     try:
-        record = _make_ot_record(form)
-    except (ValueError, TypeError) as e:
-        return RedirectResponse(
-            f"/dashboard?error=save&message={quote(str(e)[:80])}",
-            status_code=303,
-        )
+        form = await request.form()
+        try:
+            record = _make_ot_record(form)
+        except Exception as e:
+            return RedirectResponse(
+                f"/dashboard?error=save&message={quote(str(e)[:80])}",
+                status_code=303,
+            )
 
-    db.add(record)
-    try:
-        db.commit()
+        db.add(record)
+        try:
+            db.commit()
+        except IntegrityError as e:
+            db.rollback()
+            err_msg = str(e).lower()
+            if "ot_register_pkey" in err_msg or ("null" in err_msg and "id" in err_msg) or "not-null" in err_msg:
+                ensure_postgres_id_default(db, "ot_register")
+                db.commit()
+                try:
+                    record2 = _make_ot_record(form)
+                    db.add(record2)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    return RedirectResponse(
+                        "/dashboard?error=save&message=" + quote("Could not save after fixing DB. Please try again."),
+                        status_code=303,
+                    )
+            else:
+                raise
+
+        return RedirectResponse("/dashboard", status_code=303)
+
     except IntegrityError as e:
         db.rollback()
-        err_msg = str(e).lower()
-        # Broken sequence (duplicate id) or missing default (null id) after migration
-        if "ot_register_pkey" in err_msg or ("null" in err_msg and "id" in err_msg) or "not-null" in err_msg:
-            ensure_postgres_id_default(db, "ot_register")
-            db.commit()
-            try:
-                record2 = _make_ot_record(form)
-                db.add(record2)
-                db.commit()
-            except Exception:
-                db.rollback()
-                return RedirectResponse(
-                    "/dashboard?error=save&message=" + quote("Could not save after fixing DB. Please try again."),
-                    status_code=303,
-                )
-        else:
-            raise
-
+        return RedirectResponse(
+            "/dashboard?error=save&message=" + quote("Database constraint: " + str(e)[:80]),
+            status_code=303,
+        )
     except Exception as e:
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        import traceback
+        traceback.print_exc()
         return RedirectResponse(
             "/dashboard?error=save&message=" + quote(str(e)[:100]),
             status_code=303,
         )
-
-    return RedirectResponse("/dashboard", status_code=303)
 # --------------------------------------------------
 # Root & favicon
 # --------------------------------------------------
@@ -920,6 +928,7 @@ import requests
 import re
 
 from datetime import datetime, date, timedelta
+from calendar import monthrange
 from collections import defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -928,16 +937,44 @@ from app.database import SessionLocal
 from app.models import OTRegister
 
 
+def get_report_dates_from_preset(preset: str | None, from_date: str | None, to_date: str | None):
+    """Resolve (from_date, to_date) for reports. If preset is set, compute dates; else use from_date/to_date."""
+    if preset:
+        today = date.today()
+        if preset == "this_month":
+            from_d = today.replace(day=1)
+            to_d = today
+        elif preset == "last_month":
+            y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+            from_d = date(y, m, 1)
+            to_d = date(y, m, monthrange(y, m)[1])
+        elif preset == "last_6_months":
+            y, m = today.year, today.month - 6
+            if m <= 0:
+                m += 12
+                y -= 1
+            from_d = date(y, m, 1)
+            to_d = today
+        else:
+            from_d = to_d = None
+        if from_d is not None and to_d is not None:
+            return from_d.strftime("%Y-%m-%d"), to_d.strftime("%Y-%m-%d")
+    return from_date, to_date
+
+
 @app.get("/reports/surgery")
 @app.get("/reports/surgery")
 def surgery_report(
     request: Request,
     from_date: str | None = None,
     to_date: str | None = None,
+    preset: str | None = None,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),  # 🔐 already a User object
 ):
     current_user = admin   # ✅ just reuse it
+
+    from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
     records = []
     category_totals = {}
@@ -1173,10 +1210,13 @@ def vue_report(
     request: Request,
     from_date: str | None = None,
     to_date: str | None = None,
+    preset: str | None = None,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     current_user = admin
+
+    from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
     records = []
     category_totals = {}
@@ -1236,10 +1276,13 @@ def category_iol_report(
     request: Request,
     from_date: str | None = None,
     to_date: str | None = None,
+    preset: str | None = None,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     current_user = admin
+
+    from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
     category_iol_data = {}
     category_totals = {}
@@ -1306,9 +1349,12 @@ def intravitreal_report(
     request: Request,
     from_date: str | None = None,
     to_date: str | None = None,
+    preset: str | None = None,
     db: Session = Depends(get_db),
     user_id: int = Depends(require_login),
 ):
+    from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
+
     records = []
     category_totals = defaultdict(int)
     drug_totals = defaultdict(int)

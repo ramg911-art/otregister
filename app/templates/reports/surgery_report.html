@@ -18,8 +18,16 @@
         <!-- ===================== -->
         <!-- Filters -->
         <!-- ===================== -->
-        <form method="get" class="row g-3 mb-4">
+        <div class="mb-3">
+            <span class="form-label d-block mb-1">Preset</span>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/reports/surgery?preset=this_month" class="btn btn-outline-secondary btn-sm">This month till date</a>
+                <a href="/reports/surgery?preset=last_month" class="btn btn-outline-secondary btn-sm">Last month</a>
+                <a href="/reports/surgery?preset=last_6_months" class="btn btn-outline-secondary btn-sm">Last 6 months</a>
+            </div>
+        </div>
 
+        <form method="get" class="row g-3 mb-4">
             <div class="col-md-3">
                 <label class="form-label">From Date</label>
                 <input

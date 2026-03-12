@@ -9,6 +9,14 @@
     </div>
 
     <div class="card-body">
+        <div class="mb-3">
+            <span class="form-label d-block mb-1">Preset</span>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/reports/vue?preset=this_month" class="btn btn-outline-secondary btn-sm">This month till date</a>
+                <a href="/reports/vue?preset=last_month" class="btn btn-outline-secondary btn-sm">Last month</a>
+                <a href="/reports/vue?preset=last_6_months" class="btn btn-outline-secondary btn-sm">Last 6 months</a>
+            </div>
+        </div>
         <form method="get" class="row g-2 mb-3">
             <div class="col-md-3">
                 <label class="form-label">From Date</label>

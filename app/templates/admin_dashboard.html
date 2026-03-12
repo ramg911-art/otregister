@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard – OT Register{% endblock %}
+
+{% block head %}
+<style>
+    :root {
+        --dash-primary: #2563eb;
+        --dash-success: #059669;
+        --dash-warning: #d97706;
+        --dash-info: #0891b2;
+        --dash-card-radius: 12px;
+        --dash-shadow: 0 4px 14px rgba(0,0,0,.08);
+        --dash-shadow-hover: 0 8px 24px rgba(0,0,0,.12);
+    }
+    .dashboard-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .dashboard-header h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 0;
+    }
+    .range-selector {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .range-selector label { margin: 0; font-weight: 500; color: #475569; }
+    .range-selector .btn-group .btn {
+        font-size: 0.875rem;
+    }
+    .range-selector .btn.active {
+        background: var(--dash-primary);
+        border-color: var(--dash-primary);
+        color: #fff;
+    }
+    .custom-dates {
+        display: none;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .custom-dates.show { display: flex; flex-wrap: wrap; }
+    .custom-dates input[type=date] { max-width: 140px; }
+    .stat-tile {
+        border-radius: var(--dash-card-radius);
+        box-shadow: var(--dash-shadow);
+        padding: 1.25rem;
+        transition: transform .15s ease, box-shadow .2s ease;
+        border: none;
+        height: 100%;
+    }
+    .stat-tile:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--dash-shadow-hover);
+    }
+    .stat-tile .tile-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: rgba(255,255,255,.85);
+        margin-bottom: 0.25rem;
+    }
+    .stat-tile .tile-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #fff;
+    }
+    .stat-tile.tile-cataract { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); }
+    .stat-tile.tile-intravitreal { background: linear-gradient(135deg, #059669 0%, #047857 100%); }
+    .stat-tile.tile-vue-cat { background: linear-gradient(135deg, #d97706 0%, #b45309 100%); }
+    .stat-tile.tile-vue-intra { background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%); }
+    .chart-card {
+        border-radius: var(--dash-card-radius);
+        box-shadow: var(--dash-shadow);
+        padding: 1.25rem;
+        background: #fff;
+        margin-bottom: 1.5rem;
+    }
+    .chart-card h5 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #334155;
+        margin-bottom: 1rem;
+    }
+    .chart-container { position: relative; height: 280px; }
+    .date-range-badge {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-bottom: 0.5rem;
+    }
+    .loading-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(255,255,255,.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--dash-card-radius);
+        z-index: 5;
+    }
+    .loading-overlay.hide { display: none; }
+    .spinner-border { color: var(--dash-primary); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Admin Dashboard</h1>
+    <div class="range-selector">
+        <label class="me-2">Period:</label>
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-primary range-btn active" data-range="mtd">Month to date</button>
+            <button type="button" class="btn btn-outline-primary range-btn" data-range="last_month">Last month</button>
+            <button type="button" class="btn btn-outline-primary range-btn" data-range="last_6months">Last 6 months</button>
+            <button type="button" class="btn btn-outline-primary range-btn" data-range="custom">Custom</button>
+        </div>
+        <div class="custom-dates" id="customDates">
+            <input type="date" id="fromDate" class="form-control form-control-sm">
+            <span>to</span>
+            <input type="date" id="toDate" class="form-control form-control-sm">
+            <button type="button" class="btn btn-sm btn-primary" id="applyCustom">Apply</button>
+        </div>
+    </div>
+</div>
+
+<div class="date-range-badge" id="dateRangeLabel">Loading…</div>
+
+<div class="row g-3 mb-4" id="tilesRow">
+    <div class="col-6 col-md-3">
+        <div class="stat-tile tile-cataract">
+            <div class="tile-label">Total Cataracts</div>
+            <div class="tile-value" id="tileCataracts">–</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="stat-tile tile-intravitreal">
+            <div class="tile-label">Total Intravitreal</div>
+            <div class="tile-value" id="tileIntravitreal">–</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="stat-tile tile-vue-cat">
+            <div class="tile-label">Vue Referral (Cataract)</div>
+            <div class="tile-value" id="tileVueCataract">–</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="stat-tile tile-vue-intra">
+            <div class="tile-label">Vue Referral (Intravitreal)</div>
+            <div class="tile-value" id="tileVueIntravitreal">–</div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="chart-card">
+            <h5>Top IOLs (by volume)</h5>
+            <div class="chart-container position-relative">
+                <div class="loading-overlay" id="loadIol"><div class="spinner-border" role="status"></div></div>
+                <canvas id="chartIol"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="chart-card">
+            <h5>Patient category</h5>
+            <div class="chart-container position-relative">
+                <div class="loading-overlay" id="loadCat"><div class="spinner-border" role="status"></div></div>
+                <canvas id="chartCategory"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    const rangeBtns = document.querySelectorAll('.range-btn');
+    const customDates = document.getElementById('customDates');
+    const fromDate = document.getElementById('fromDate');
+    const toDate = document.getElementById('toDate');
+    const applyCustom = document.getElementById('applyCustom');
+    const dateRangeLabel = document.getElementById('dateRangeLabel');
+    const tiles = {
+        cataracts: document.getElementById('tileCataracts'),
+        intravitreal: document.getElementById('tileIntravitreal'),
+        vueCataract: document.getElementById('tileVueCataract'),
+        vueIntravitreal: document.getElementById('tileVueIntravitreal'),
+    };
+    const loadIol = document.getElementById('loadIol');
+    const loadCat = document.getElementById('loadCat');
+
+    let currentRange = 'mtd';
+    let chartIol = null;
+    let chartCategory = null;
+
+    function formatDate(d) {
+        const dt = new Date(d);
+        return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function setLoading(loading) {
+        loadIol.classList.toggle('hide', !loading);
+        loadCat.classList.toggle('hide', !loading);
+    }
+
+    function buildUrl() {
+        const params = new URLSearchParams();
+        params.set('range_type', currentRange);
+        if (currentRange === 'custom') {
+            if (fromDate.value) params.set('from_date', fromDate.value);
+            if (toDate.value) params.set('to_date', toDate.value);
+        }
+        return '/admin/dashboard/api/stats?' + params.toString();
+    }
+
+    function fetchStats() {
+        setLoading(true);
+        fetch(buildUrl())
+            .then(r => r.json())
+            .then(data => {
+                dateRangeLabel.textContent = formatDate(data.date_from) + ' – ' + formatDate(data.date_to);
+                tiles.cataracts.textContent = data.total_cataracts;
+                tiles.intravitreal.textContent = data.total_intravitreal;
+                tiles.vueCataract.textContent = data.vue_cataract;
+                tiles.vueIntravitreal.textContent = data.vue_intravitreal;
+
+                if (chartIol) chartIol.destroy();
+                const ctxIol = document.getElementById('chartIol').getContext('2d');
+                chartIol = new Chart(ctxIol, {
+                    type: 'bar',
+                    data: {
+                        labels: (data.top_iols || []).map(x => x.iol_name),
+                        datasets: [{
+                            label: 'Cases',
+                            data: (data.top_iols || []).map(x => x.count),
+                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                            borderColor: 'rgb(37, 99, 235)',
+                            borderWidth: 1,
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { beginAtZero: true, ticks: { stepSize: 1 } },
+                            y: { ticks: { font: { size: 11 } } }
+                        }
+                    }
+                });
+
+                if (chartCategory) chartCategory.destroy();
+                const ctxCat = document.getElementById('chartCategory').getContext('2d');
+                const colors = ['#2563eb','#059669','#d97706','#0891b2','#7c3aed','#dc2626'];
+                chartCategory = new Chart(ctxCat, {
+                    type: 'doughnut',
+                    data: {
+                        labels: (data.category_counts || []).map(x => x.category),
+                        datasets: [{
+                            data: (data.category_counts || []).map(x => x.count),
+                            backgroundColor: (data.category_counts || []).map((_, i) => colors[i % colors.length]),
+                            borderWidth: 2,
+                            borderColor: '#fff'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right' }
+                        }
+                    }
+                });
+                setLoading(false);
+            })
+            .catch(() => { setLoading(false); dateRangeLabel.textContent = 'Error loading data'; });
+    }
+
+    rangeBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            rangeBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentRange = this.dataset.range;
+            customDates.classList.toggle('show', currentRange === 'custom');
+            if (currentRange !== 'custom') fetchStats();
+        });
+    });
+    applyCustom.addEventListener('click', function() {
+        if (fromDate.value && toDate.value && fromDate.value <= toDate.value) fetchStats();
+    });
+    fetchStats();
+})();
+</script>
+{% endblock %}

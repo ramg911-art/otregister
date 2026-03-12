@@ -575,6 +575,115 @@ def delete_drug(
         status_code=303
     )
 
+
+# --------------------------------------------------
+# Admin Dashboard (stats with date range)
+# --------------------------------------------------
+def _admin_dashboard_dates(range_type: str, from_str: str | None, to_str: str | None):
+    """Return (date_from, date_to) for dashboard. Default: month to date."""
+    today = date.today()
+    if range_type == "last_month":
+        first_this = today.replace(day=1)
+        last_prev = first_this - timedelta(days=1)
+        first_prev = last_prev.replace(day=1)
+        return first_prev, last_prev
+    if range_type == "last_6months":
+        first = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        # 6 months back from start of current month
+        for _ in range(5):
+            first = (first.replace(day=1) - timedelta(days=1)).replace(day=1)
+        return first, today
+    if range_type == "custom" and from_str and to_str:
+        try:
+            f = datetime.strptime(from_str, "%Y-%m-%d").date()
+            t = datetime.strptime(to_str, "%Y-%m-%d").date()
+            if f <= t:
+                return f, t
+        except ValueError:
+            pass
+    # default: month to date
+    first_mtd = today.replace(day=1)
+    return first_mtd, today
+
+
+@app.get("/admin/dashboard")
+def admin_dashboard_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return templates.TemplateResponse(
+        "admin_dashboard.html",
+        {"request": request, "current_user": admin},
+    )
+
+
+@app.get("/admin/dashboard/api/stats")
+def admin_dashboard_api(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+    range_type: str = "mtd",
+    from_date: str | None = None,
+    to_date: str | None = None,
+):
+    date_from, date_to = _admin_dashboard_dates(range_type, from_date, to_date)
+
+    base = db.query(OTRegister).filter(
+        OTRegister.date_of_surgery >= date_from,
+        OTRegister.date_of_surgery <= date_to,
+    )
+
+    total_cataracts = base.filter(OTRegister.surgery == "Cataract").count()
+    total_intravitreal = base.filter(OTRegister.surgery == "Intravitreal Injection").count()
+    vue_cataract = base.filter(
+        OTRegister.surgery == "Cataract",
+        OTRegister.is_vue == True,
+    ).count()
+    vue_intravitreal = base.filter(
+        OTRegister.surgery == "Intravitreal Injection",
+        OTRegister.is_vue == True,
+    ).count()
+
+    top_iols = (
+        db.query(IOLMaster.iol_name, func.count(OTRegister.id).label("cnt"))
+        .join(OTRegister, OTRegister.iol_id == IOLMaster.id)
+        .filter(
+            OTRegister.date_of_surgery >= date_from,
+            OTRegister.date_of_surgery <= date_to,
+        )
+        .group_by(IOLMaster.iol_name)
+        .order_by(func.count(OTRegister.id).desc())
+        .limit(10)
+        .all()
+    )
+    top_iols_list = [{"iol_name": name, "count": c} for name, c in top_iols]
+
+    category_rows = (
+        db.query(OTRegister.category, func.count(OTRegister.id).label("cnt"))
+        .filter(
+            OTRegister.date_of_surgery >= date_from,
+            OTRegister.date_of_surgery <= date_to,
+            OTRegister.category.isnot(None),
+            OTRegister.category != "",
+        )
+        .group_by(OTRegister.category)
+        .order_by(func.count(OTRegister.id).desc())
+        .all()
+    )
+    category_counts = [{"category": c or "Other", "count": n} for c, n in category_rows]
+
+    return JSONResponse({
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "total_cataracts": total_cataracts,
+        "total_intravitreal": total_intravitreal,
+        "vue_cataract": vue_cataract,
+        "vue_intravitreal": vue_intravitreal,
+        "top_iols": top_iols_list,
+        "category_counts": category_counts,
+    })
+
+
 from collections import defaultdict
 from datetime import datetime
 from fastapi import Request, Depends

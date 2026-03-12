@@ -95,13 +95,13 @@ from app.auth import require_login
 def dashboard(
     request: Request,
     selected_date: str | None = None,
+    error: str | None = None,
+    message: str | None = None,
     db: Session = Depends(get_db),
     user_id: int = Depends(require_login),
 ):
-    # 🔑 fetch logged-in user
     current_user = db.query(User).filter(User.id == user_id).first()
 
-    # date handling
     if selected_date:
         day = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
@@ -121,7 +121,9 @@ def dashboard(
             "request": request,
             "records": records,
             "selected_date": selected_date,
-            "current_user": current_user,  # ✅ THIS IS STEP 3
+            "current_user": current_user,
+            "save_error": error,
+            "save_error_message": message or "",
         },
     )
 
@@ -242,22 +244,16 @@ from datetime import datetime
 @app.post("/ot/save")
 
 
-@app.post("/ot/save")
-async def save_ot(
-    request: Request,
-    user_id: int = Depends(require_login),
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-
-    # ✅ DEFINE date_str first
+def _make_ot_record(form):
     date_str = form.get("date_of_surgery")
+    if not date_str:
+        raise ValueError("date_of_surgery is required")
     intravitreal_drug_id = (
-    int(form.get("intravitreal_drug_id"))
-    if form.get("intravitreal_drug_id")
-    else None
-)
-    record = OTRegister(
+        int(form.get("intravitreal_drug_id"))
+        if form.get("intravitreal_drug_id")
+        else None
+    )
+    return OTRegister(
         patient_uhid=form.get("patient_uhid"),
         patient_name=form.get("patient_name"),
         surgery=form.get("surgery"),
@@ -270,31 +266,51 @@ async def save_ot(
         date_of_surgery=datetime.strptime(date_str, "%Y-%m-%d").date(),
     )
 
+
+@app.post("/ot/save")
+async def save_ot(
+    request: Request,
+    user_id: int = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        record = _make_ot_record(form)
+    except (ValueError, TypeError) as e:
+        return RedirectResponse(
+            f"/dashboard?error=save&message={quote(str(e)[:80])}",
+            status_code=303,
+        )
+
     db.add(record)
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
         err_msg = str(e).lower()
-        if "ot_register_pkey" in err_msg:
-            fix_postgres_sequence(db, "ot_register")
+        # Broken sequence (duplicate id) or missing default (null id) after migration
+        if "ot_register_pkey" in err_msg or ("null" in err_msg and "id" in err_msg) or "not-null" in err_msg:
+            ensure_postgres_id_default(db, "ot_register")
             db.commit()
-            record2 = OTRegister(
-                patient_uhid=form.get("patient_uhid"),
-                patient_name=form.get("patient_name"),
-                surgery=form.get("surgery"),
-                category=form.get("category"),
-                surgeon_name=form.get("surgeon_name"),
-                eye=form.get("eye"),
-                iol_id=int(form.get("iol_id")) if form.get("iol_id") else None,
-                is_vue=bool(form.get("is_vue")),
-                intravitreal_drug_id=intravitreal_drug_id,
-                date_of_surgery=datetime.strptime(date_str, "%Y-%m-%d").date(),
-            )
-            db.add(record2)
-            db.commit()
+            try:
+                record2 = _make_ot_record(form)
+                db.add(record2)
+                db.commit()
+            except Exception:
+                db.rollback()
+                return RedirectResponse(
+                    "/dashboard?error=save&message=" + quote("Could not save after fixing DB. Please try again."),
+                    status_code=303,
+                )
         else:
             raise
+
+    except Exception as e:
+        db.rollback()
+        return RedirectResponse(
+            "/dashboard?error=save&message=" + quote(str(e)[:100]),
+            status_code=303,
+        )
 
     return RedirectResponse("/dashboard", status_code=303)
 # --------------------------------------------------

@@ -1028,6 +1028,7 @@ def intravitreal_report(
 # TELEGRAM BOT – LONG POLLING (NO WEBHOOK, NO NGROK)
 # ============================================================
 
+import os
 import requests
 import threading
 import time
@@ -1036,16 +1037,20 @@ from sqlalchemy import func
 from app.database import SessionLocal
 
 # ----------------------------
-# CONFIGURATION
+# CONFIGURATION (from .env)
 # ----------------------------
-TELEGRAM_BOT_TOKEN = "8349239697:AAEELHOvLOOXAYidbOpfA2SN0fVYbg0oSCc"
-SURGEON_CHAT_ID = 763541796  # <-- replace with actual chat_id
-
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+SURGEON_CHAT_ID = None  # set from TELEGRAM_CHAT_ID
+_tid = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+if _tid.isdigit():
+    SURGEON_CHAT_ID = int(_tid)
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
 # ------------------------------------------------------------
 # SEND MESSAGE
 # ------------------------------------------------------------
 def send_telegram_message(text: str, parse_mode: str = "Markdown"):
+    if not TELEGRAM_API or SURGEON_CHAT_ID is None:
+        return
     try:
         requests.post(
             f"{TELEGRAM_API}/sendMessage",
@@ -1062,6 +1067,8 @@ def send_telegram_message(text: str, parse_mode: str = "Markdown"):
 
 def send_telegram_photo(photo_bytes: bytes, filename: str = "sortsend.png"):
     """Send a photo (PNG/JPEG bytes) to the surgeon chat."""
+    if not TELEGRAM_API or SURGEON_CHAT_ID is None:
+        return
     try:
         requests.post(
             f"{TELEGRAM_API}/sendPhoto",
@@ -1720,6 +1727,9 @@ def get_month_summary(db, month, year, label):
 # TELEGRAM POLLING LOOP
 # ============================================================
 def telegram_polling_loop():
+    if not TELEGRAM_API or SURGEON_CHAT_ID is None:
+        print("⚠️ Telegram bot disabled: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
+        return
     offset = None
     print("✅ Telegram polling ACTIVE")
 

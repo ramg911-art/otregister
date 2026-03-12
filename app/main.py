@@ -770,6 +770,11 @@ def _admin_dashboard_dates(range_type: str, from_str: str | None, to_str: str | 
     return first_mtd, today
 
 
+def _month_year_label(d: date) -> str:
+    """Format date as 'Month YYYY' e.g. March 2026."""
+    return d.strftime("%B %Y")
+
+
 def _compare_period_dates(compare: str):
     """Return (date_from_a, date_to_a, date_from_b, date_to_b, label_a, label_b)."""
     today = date.today()
@@ -778,7 +783,7 @@ def _compare_period_dates(compare: str):
         first_this = today.replace(day=1)
         last_prev = first_this - timedelta(days=1)
         first_prev = last_prev.replace(day=1)
-        return first_this, today, first_prev, last_prev, "This month", "Last month"
+        return first_this, today, first_prev, last_prev, _month_year_label(first_this), _month_year_label(first_prev)
     if compare == "quarter":
         # This quarter vs Last quarter (calendar Q: 1-3, 4-6, 7-9, 10-12)
         q = (today.month - 1) // 3 + 1
@@ -789,7 +794,9 @@ def _compare_period_dates(compare: str):
         else:
             start_prev_q = date(today.year, (q - 2) * 3 + 1, 1)
             end_prev_q = start_this_q - timedelta(days=1)
-        return start_this_q, today, start_prev_q, end_prev_q, "This quarter", "Last quarter"
+        label_a = f"Q{q} {today.year}"
+        label_b = f"Q{q - 1 if q > 1 else 4} {today.year if q > 1 else today.year - 1}"
+        return start_this_q, today, start_prev_q, end_prev_q, label_a, label_b
     if compare == "6months":
         # Last 6 months vs 6 months before that
         end_a = today
@@ -800,13 +807,15 @@ def _compare_period_dates(compare: str):
         start_b = end_b.replace(day=1)
         for _ in range(5):
             start_b = (start_b - timedelta(days=1)).replace(day=1)
-        return start_a, end_a, start_b, end_b, "Last 6 months", "Previous 6 months"
+        label_a = f"{_month_year_label(start_a)} – {_month_year_label(end_a)}"
+        label_b = f"{_month_year_label(start_b)} – {_month_year_label(end_b)}"
+        return start_a, end_a, start_b, end_b, label_a, label_b
     if compare == "year":
         # This year (Jan 1 to today) vs Last year (Jan 1 to Dec 31)
         start_this = date(today.year, 1, 1)
         start_prev = date(today.year - 1, 1, 1)
         end_prev = date(today.year - 1, 12, 31)
-        return start_this, today, start_prev, end_prev, "This year", "Last year"
+        return start_this, today, start_prev, end_prev, str(today.year), str(today.year - 1)
     return None
 
 

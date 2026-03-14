@@ -79,6 +79,27 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
         pass
 
 
+def reset_ot_register_sequence(db):
+    """
+    Reset ot_register.id sequence to MAX(id)+1. Use whichever sequence is attached to the column
+    (pg_get_serial_sequence) or fall back to ot_register_id_seq. Call this before retrying an insert
+    after a duplicate-key on id (e.g. after SQLite→PostgreSQL migration).
+    """
+    if db.get_bind().url.drivername == "sqlite":
+        return
+    from sqlalchemy import text
+    try:
+        # Use sequence linked to column if any, else ot_register_id_seq
+        db.execute(text("""
+            SELECT setval(
+                COALESCE(pg_get_serial_sequence('ot_register', 'id')::regclass, 'ot_register_id_seq'::regclass),
+                (SELECT COALESCE(MAX(id), 0) + 1 FROM ot_register)
+            )
+        """))
+    except Exception:
+        pass
+
+
 def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     """
     Ensure the id column has DEFAULT nextval(...) so INSERTs get an id.

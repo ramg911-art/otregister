@@ -7,7 +7,7 @@ from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, SessionLocal
+from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, reset_ot_register_sequence, SessionLocal
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
@@ -295,6 +295,7 @@ async def save_ot(
             )
             if is_pkey_or_duplicate:
                 ensure_postgres_id_default(db, "ot_register")
+                reset_ot_register_sequence(db)  # ensure next id is MAX(id)+1 (handles pgloader sequence)
                 db.commit()
                 try:
                     record2 = _make_ot_record(form)

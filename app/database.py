@@ -69,12 +69,12 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     allowed = ("users", "ot_register", "iol_master", "intravitreal_drug_master")
     if table_name not in allowed:
         return
+    # Use explicit sequence name so it works after pgloader migration (pg_get_serial_sequence can be NULL)
+    seq_name = table_name + "_" + id_column + "_seq"
     try:
-        sql = (
-            "SELECT setval(pg_get_serial_sequence(:t, :c), "
-            "(SELECT COALESCE(MAX(id), 0) + 1 FROM " + table_name + "))"
-        )
-        db.execute(text(sql), {"t": table_name, "c": id_column})
+        db.execute(text(
+            "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
+        ), {"seq": seq_name})
     except Exception:
         pass
 

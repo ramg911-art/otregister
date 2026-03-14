@@ -300,10 +300,13 @@ async def save_ot(
                     record2 = _make_ot_record(form)
                     db.add(record2)
                     db.commit()
-                except Exception:
+                except Exception as retry_err:
                     db.rollback()
+                    msg = str(retry_err).strip()[:150]
+                    if not msg:
+                        msg = "Could not save after fixing DB. Please try again."
                     return RedirectResponse(
-                        "/dashboard?error=save&message=" + quote("Could not save after fixing DB. Please try again."),
+                        "/dashboard?error=save&message=" + quote(msg),
                         status_code=303,
                     )
             else:

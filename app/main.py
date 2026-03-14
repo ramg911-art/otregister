@@ -286,7 +286,14 @@ async def save_ot(
         except IntegrityError as e:
             db.rollback()
             err_msg = str(e).lower()
-            if "ot_register_pkey" in err_msg or ("null" in err_msg and "id" in err_msg) or "not-null" in err_msg:
+            # Migration fix: after SQLite→PostgreSQL, id sequence can be wrong → duplicate key on id
+            is_pkey_or_duplicate = (
+                "ot_register_pkey" in err_msg
+                or ("duplicate key" in err_msg and "unique constraint" in err_msg)
+                or ("null" in err_msg and "id" in err_msg)
+                or "not-null" in err_msg
+            )
+            if is_pkey_or_duplicate:
                 ensure_postgres_id_default(db, "ot_register")
                 db.commit()
                 try:

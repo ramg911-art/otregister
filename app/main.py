@@ -280,6 +280,10 @@ async def save_ot(
                 status_code=303,
             )
 
+        # Proactively sync id sequence on PostgreSQL so next id is always MAX(id)+1 (avoids duplicate key after migration or concurrent saves)
+        if db.get_bind().url.drivername != "sqlite":
+            reset_ot_register_sequence(db)
+
         db.add(record)
         try:
             db.commit()

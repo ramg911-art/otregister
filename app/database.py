@@ -161,6 +161,9 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     Ensure the id column has DEFAULT nextval(...) so INSERTs get an id.
     Fixes 'null value in column "id" violates not-null constraint' after pgloader migration.
     Uses a separate engine transaction so failed DDL cannot abort the ORM session.
+
+    After SQLite/pgloader imports, pg_get_serial_sequence() is often NULL until we:
+    SET DEFAULT + ALTER SEQUENCE ... OWNED BY — that links the sequence so resets apply correctly.
     """
     if db.get_bind().url.drivername == "sqlite":
         return
@@ -169,6 +172,8 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_name = table_name + "_" + id_column + "_seq"
+    # qualified ref for OWNED BY / regclass (public schema)
+    tbl_col = table_name + "." + id_column
 
     def _do(conn):
         conn.execute(text("CREATE SEQUENCE IF NOT EXISTS " + seq_name))
@@ -178,6 +183,11 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
                 + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
             )
         )
+        # Link sequence ↔ column so pg_get_serial_sequence() is non-NULL (fixes pgloader imports)
+        try:
+            conn.execute(text("ALTER SEQUENCE " + seq_name + " OWNED BY " + tbl_col))
+        except Exception:
+            pass
         max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + table_name + ")"
         conn.execute(
             text("SELECT setval(:seq::regclass, " + max_sub + ")"),

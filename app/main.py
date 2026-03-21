@@ -440,7 +440,6 @@ def add_iol(
             if db.get_bind().url.drivername != "sqlite":
                 ensure_postgres_id_default(db, "iol_master")
                 reset_id_sequence(db, "iol_master")
-                db.commit()
             _iol_add_attempt(db, nm, pkg)
             db.commit()
     except IntegrityError as e:

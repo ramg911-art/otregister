@@ -70,6 +70,19 @@ def _rollback_if_postgres(db):
         pass
 
 
+def _pg_engine_run(db, fn):
+    """
+    Run fn(connection) inside its own committed transaction on the engine.
+    Does NOT use the ORM session — avoids InFailedSqlTransaction poisoning the session
+    when setval/DDL fails or after errors.
+    """
+    bind = db.get_bind()
+    if bind.url.drivername == "sqlite":
+        return
+    with bind.begin() as conn:
+        fn(conn)
+
+
 def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     """Fix PostgreSQL sequence for table after migration (SQLite→PG). Safe to call for SQLite (no-op)."""
     if db.get_bind().url.drivername == "sqlite":
@@ -78,20 +91,26 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     allowed = ("users", "ot_register", "iol_master", "intravitreal_drug_master")
     if table_name not in allowed:
         return
-    # Use explicit sequence name so it works after pgloader migration (pg_get_serial_sequence can be NULL)
     seq_name = table_name + "_" + id_column + "_seq"
+
+    def _do(conn):
+        conn.execute(
+            text(
+                "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
+            ),
+            {"seq": seq_name},
+        )
+
     try:
-        db.execute(text(
-            "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
-        ), {"seq": seq_name})
+        _pg_engine_run(db, _do)
     except Exception:
-        _rollback_if_postgres(db)
+        pass
 
 
 def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     """
     Reset id sequence for a table to MAX(id)+1. Uses pg_get_serial_sequence when set, else
-    {table_name}_id_seq. Safe allowlist only (migration / duplicate-key fix for PostgreSQL).
+    {table_name}_id_seq. Runs on a separate engine transaction so the ORM session stays valid.
     """
     if db.get_bind().url.drivername == "sqlite":
         return
@@ -100,8 +119,9 @@ def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_fallback = f"{table_name}_{id_column}_seq"
-    try:
-        db.execute(
+
+    def _do(conn):
+        conn.execute(
             text(
                 f"""
                 SELECT setval(
@@ -112,6 +132,9 @@ def reset_id_sequence(db, table_name: str, id_column: str = "id"):
             ),
             {"tbl": table_name, "col": id_column, "fb": seq_fallback},
         )
+
+    try:
+        _pg_engine_run(db, _do)
     except Exception:
         pass
 
@@ -125,6 +148,7 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     """
     Ensure the id column has DEFAULT nextval(...) so INSERTs get an id.
     Fixes 'null value in column "id" violates not-null constraint' after pgloader migration.
+    Uses a separate engine transaction so failed DDL cannot abort the ORM session.
     """
     if db.get_bind().url.drivername == "sqlite":
         return
@@ -133,12 +157,23 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_name = table_name + "_" + id_column + "_seq"
+
+    def _do(conn):
+        conn.execute(text("CREATE SEQUENCE IF NOT EXISTS " + seq_name))
+        conn.execute(
+            text(
+                "ALTER TABLE " + table_name + " ALTER COLUMN " + id_column
+                + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
+            )
+        )
+        conn.execute(
+            text(
+                "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
+            ),
+            {"seq": seq_name},
+        )
+
     try:
-        db.execute(text("CREATE SEQUENCE IF NOT EXISTS " + seq_name))
-        db.execute(text(
-            "ALTER TABLE " + table_name + " ALTER COLUMN " + id_column
-            + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
-        ))
-        fix_postgres_sequence(db, table_name, id_column)
+        _pg_engine_run(db, _do)
     except Exception:
-        _rollback_if_postgres(db)
+        pass

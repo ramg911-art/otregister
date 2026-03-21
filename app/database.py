@@ -79,25 +79,37 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
         pass
 
 
-def reset_ot_register_sequence(db):
+def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     """
-    Reset ot_register.id sequence to MAX(id)+1. Use whichever sequence is attached to the column
-    (pg_get_serial_sequence) or fall back to ot_register_id_seq. Call this before retrying an insert
-    after a duplicate-key on id (e.g. after SQLite→PostgreSQL migration).
+    Reset id sequence for a table to MAX(id)+1. Uses pg_get_serial_sequence when set, else
+    {table_name}_id_seq. Safe allowlist only (migration / duplicate-key fix for PostgreSQL).
     """
     if db.get_bind().url.drivername == "sqlite":
         return
     from sqlalchemy import text
+    allowed = ("users", "ot_register", "iol_master", "intravitreal_drug_master")
+    if table_name not in allowed:
+        return
+    seq_fallback = f"{table_name}_{id_column}_seq"
     try:
-        # Use sequence linked to column if any, else ot_register_id_seq
-        db.execute(text("""
-            SELECT setval(
-                COALESCE(pg_get_serial_sequence('ot_register', 'id')::regclass, 'ot_register_id_seq'::regclass),
-                (SELECT COALESCE(MAX(id), 0) + 1 FROM ot_register)
-            )
-        """))
+        db.execute(
+            text(
+                f"""
+                SELECT setval(
+                    COALESCE(pg_get_serial_sequence(:tbl, :col)::regclass, :fb::regclass),
+                    (SELECT COALESCE(MAX({id_column}), 0) + 1 FROM {table_name})
+                )
+                """
+            ),
+            {"tbl": table_name, "col": id_column, "fb": seq_fallback},
+        )
     except Exception:
         pass
+
+
+def reset_ot_register_sequence(db):
+    """Reset ot_register.id sequence (see reset_id_sequence)."""
+    reset_id_sequence(db, "ot_register")
 
 
 def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):

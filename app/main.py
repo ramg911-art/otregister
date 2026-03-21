@@ -7,7 +7,7 @@ from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, reset_ot_register_sequence, SessionLocal
+from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, reset_ot_register_sequence, reset_id_sequence, SessionLocal
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
@@ -410,6 +410,10 @@ def add_iol(
     if not user_id:
         return RedirectResponse("/login", status_code=302)
 
+    if db.get_bind().url.drivername != "sqlite":
+        ensure_postgres_id_default(db, "iol_master")
+        reset_id_sequence(db, "iol_master")
+
     iol = IOLMaster(
         iol_name=name.strip(),
         package=package.strip(),
@@ -419,12 +423,28 @@ def add_iol(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        if "iol_master_pkey" in str(e).lower():
-            fix_postgres_sequence(db, "iol_master")
+        err_msg = str(e).lower()
+        # After migration, constraint name may not be iol_master_pkey (pgloader uses idx_* names)
+        is_id_duplicate = (
+            "iol_master_pkey" in err_msg
+            or ("duplicate key" in err_msg and "unique constraint" in err_msg)
+            or ("null" in err_msg and "id" in err_msg)
+            or "not-null" in err_msg
+        )
+        if is_id_duplicate:
+            ensure_postgres_id_default(db, "iol_master")
+            reset_id_sequence(db, "iol_master")
             db.commit()
             iol2 = IOLMaster(iol_name=name.strip(), package=package.strip())
             db.add(iol2)
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                return RedirectResponse(
+                    "/iol?error=save&message=" + quote("Could not add IOL (database constraint). Try again or contact admin."),
+                    status_code=303,
+                )
         else:
             raise
 

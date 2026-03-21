@@ -18,6 +18,7 @@ from datetime import datetime
 from fastapi.responses import StreamingResponse
 import io
 import csv
+from urllib.parse import quote
 from collections import defaultdict
 from datetime import date, datetime
 from collections import defaultdict
@@ -399,6 +400,12 @@ def iol_master(
     )
 
 
+def _iol_add_attempt(db, name: str, package: str) -> None:
+    """Insert one IOL row (caller commits)."""
+    iol = IOLMaster(iol_name=name.strip(), package=package.strip())
+    db.add(iol)
+
+
 @app.post("/iol/add")
 def add_iol(
     request: Request,
@@ -410,43 +417,46 @@ def add_iol(
     if not user_id:
         return RedirectResponse("/login", status_code=302)
 
-    if db.get_bind().url.drivername != "sqlite":
-        ensure_postgres_id_default(db, "iol_master")
-        reset_id_sequence(db, "iol_master")
-
-    iol = IOLMaster(
-        iol_name=name.strip(),
-        package=package.strip(),
-    )
-    db.add(iol)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        err_msg = str(e).lower()
-        # After migration, constraint name may not be iol_master_pkey (pgloader uses idx_* names)
-        is_id_duplicate = (
-            "iol_master_pkey" in err_msg
-            or ("duplicate key" in err_msg and "unique constraint" in err_msg)
-            or ("null" in err_msg and "id" in err_msg)
-            or "not-null" in err_msg
+    nm = (name or "").strip()
+    pkg = (package or "").strip()
+    if not nm or not pkg:
+        return RedirectResponse(
+            "/iol?error=save&message=" + quote("Name and package are required."),
+            status_code=303,
         )
-        if is_id_duplicate:
+
+    try:
+        if db.get_bind().url.drivername != "sqlite":
             ensure_postgres_id_default(db, "iol_master")
             reset_id_sequence(db, "iol_master")
+
+        _iol_add_attempt(db, nm, pkg)
+        try:
             db.commit()
-            iol2 = IOLMaster(iol_name=name.strip(), package=package.strip())
-            db.add(iol2)
-            try:
+        except IntegrityError:
+            db.rollback()
+            # Any integrity error on insert: fix id sequence (migration/pgloader) and retry once
+            if db.get_bind().url.drivername != "sqlite":
+                ensure_postgres_id_default(db, "iol_master")
+                reset_id_sequence(db, "iol_master")
                 db.commit()
-            except IntegrityError:
-                db.rollback()
-                return RedirectResponse(
-                    "/iol?error=save&message=" + quote("Could not add IOL (database constraint). Try again or contact admin."),
-                    status_code=303,
-                )
-        else:
-            raise
+            _iol_add_attempt(db, nm, pkg)
+            db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        return RedirectResponse(
+            "/iol?error=save&message=" + quote(str(e)[:200]),
+            status_code=303,
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return RedirectResponse(
+            "/iol?error=save&message=" + quote(str(e)[:200]),
+            status_code=303,
+        )
 
     return RedirectResponse("/iol", status_code=302)
 # ----------------------------
@@ -502,8 +512,6 @@ from app.auth import require_admin
 from app.auth import hash_password, verify_password
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
-from urllib.parse import quote
-
 @app.get("/admin/users")
 def user_management(
     request: Request,

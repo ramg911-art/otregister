@@ -426,9 +426,9 @@ def add_iol(
         )
 
     try:
-        # Only sync sequence here; ensure_postgres_id_default runs at app startup.
-        # Running ALTER/CREATE on every add can error and abort the PG transaction without rollback → InFailedSqlTransaction.
+        # Sequence / defaults: isolated connection in app.database (does not poison ORM session).
         if db.get_bind().url.drivername != "sqlite":
+            ensure_postgres_id_default(db, "iol_master")
             reset_id_sequence(db, "iol_master")
 
         _iol_add_attempt(db, nm, pkg)

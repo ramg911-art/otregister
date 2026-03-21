@@ -92,12 +92,12 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_name = table_name + "_" + id_column + "_seq"
+    # setval(seq, v): next nextval() returns v+1 — use MAX(id), not MAX(id)+1
+    max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + table_name + ")"
 
     def _do(conn):
         conn.execute(
-            text(
-                "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
-            ),
+            text("SELECT setval(:seq::regclass, " + max_sub + ")"),
             {"seq": seq_name},
         )
 
@@ -109,8 +109,10 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
 
 def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     """
-    Reset id sequence for a table to MAX(id)+1. Uses pg_get_serial_sequence when set, else
-    {table_name}_id_seq. Runs on a separate engine transaction so the ORM session stays valid.
+    Reset id sequence so the next generated id is MAX(id)+1.
+    Syncs BOTH pg_get_serial_sequence(...) and the conventional {table}_id_seq — pgloader/migrations
+    sometimes leave the column using a different sequence than our fallback.
+    Runs on a separate engine transaction so the ORM session stays valid.
     """
     if db.get_bind().url.drivername == "sqlite":
         return
@@ -119,19 +121,29 @@ def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_fallback = f"{table_name}_{id_column}_seq"
+    max_sub = f"(SELECT COALESCE(MAX({id_column}), 0) FROM {table_name})"
 
     def _do(conn):
+        # Primary: sequence PostgreSQL links to this column, else conventional name
         conn.execute(
             text(
                 f"""
                 SELECT setval(
                     COALESCE(pg_get_serial_sequence(:tbl, :col)::regclass, :fb::regclass),
-                    (SELECT COALESCE(MAX({id_column}), 0) + 1 FROM {table_name})
+                    {max_sub}
                 )
                 """
             ),
             {"tbl": table_name, "col": id_column, "fb": seq_fallback},
         )
+        # Secondary: always bump conventional name too (may differ from linked seq after migration)
+        try:
+            conn.execute(
+                text(f"SELECT setval(:fb::regclass, {max_sub})"),
+                {"fb": seq_fallback},
+            )
+        except Exception:
+            pass
 
     try:
         _pg_engine_run(db, _do)
@@ -166,10 +178,9 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
                 + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
             )
         )
+        max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + table_name + ")"
         conn.execute(
-            text(
-                "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
-            ),
+            text("SELECT setval(:seq::regclass, " + max_sub + ")"),
             {"seq": seq_name},
         )
 

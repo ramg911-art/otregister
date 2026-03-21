@@ -61,6 +61,15 @@ def get_db():
         db.close()
 
 
+def _rollback_if_postgres(db):
+    """PostgreSQL aborts the whole transaction on any error; must rollback before reuse."""
+    try:
+        if db.get_bind().url.drivername != "sqlite":
+            db.rollback()
+    except Exception:
+        pass
+
+
 def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     """Fix PostgreSQL sequence for table after migration (SQLite→PG). Safe to call for SQLite (no-op)."""
     if db.get_bind().url.drivername == "sqlite":
@@ -76,7 +85,7 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
             "SELECT setval(:seq::regclass, (SELECT COALESCE(MAX(" + id_column + "), 0) + 1 FROM " + table_name + "))"
         ), {"seq": seq_name})
     except Exception:
-        pass
+        _rollback_if_postgres(db)
 
 
 def reset_id_sequence(db, table_name: str, id_column: str = "id"):
@@ -132,4 +141,4 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
         ))
         fix_postgres_sequence(db, table_name, id_column)
     except Exception:
-        pass
+        _rollback_if_postgres(db)

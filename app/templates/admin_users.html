@@ -7,10 +7,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/theme.css" rel="stylesheet">
 </head>
 <body>
 
-<div class="container mt-4">
+<div class="container mt-4 ot-simple-panel">
 
     <h4>User Management</h4>
     {% if db_name %}
@@ -48,6 +49,18 @@
     {% elif error == 'missing' %}
     <div class="alert alert-warning alert-dismissible fade show" role="alert">
         Please enter both username and password.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if error == 'last_admin' %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        Cannot remove the last administrator. Promote another user to administrator first.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if role_updated %}
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        User role updated.
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
@@ -90,8 +103,8 @@
         <thead class="table-light">
             <tr>
                 <th>Username</th>
-                <th>Role</th>
-                <th style="width:220px;">Action</th>
+                <th style="min-width:240px;">Role</th>
+                <th style="min-width:220px;">Action</th>
             </tr>
         </thead>
 
@@ -99,7 +112,16 @@
         {% for u in users %}
             <tr>
                 <td>{{ u.username }}</td>
-                <td>{{ u.role }}</td>
+                <td>
+                    <form method="post" action="/admin/users/{{ u.id }}/role" class="d-flex flex-wrap gap-2 align-items-center">
+                        <select class="form-select form-select-sm" name="role" style="max-width: 11rem;">
+                            <option value="optometrist" {% if u.role in ('optometrist', 'staff') %}selected{% endif %}>Optometrist</option>
+                            <option value="feedback_user" {% if u.role == 'feedback_user' %}selected{% endif %}>Feedback user</option>
+                            <option value="administrator" {% if u.role in ('administrator', 'admin') %}selected{% endif %}>Administrator</option>
+                        </select>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Update role</button>
+                    </form>
+                </td>
                 <td>
 
                     <!-- Reset Password -->

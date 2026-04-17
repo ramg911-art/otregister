@@ -1,0 +1,119 @@
+/* Subtle page tint + lifted surfaces for better contrast vs flat white */
+
+:root {
+    --ot-page-0: #c5d0e3;
+    --ot-page-1: #d4dce8;
+    --ot-page-2: #e2e9f3;
+    --ot-surface: #f4f7fb;
+    --ot-surface-bright: #fcfdfe;
+    --ot-edge: rgba(15, 23, 42, 0.1);
+    --ot-edge-soft: rgba(15, 23, 42, 0.06);
+    --ot-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+    --ot-shadow-sm: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+
+html {
+    height: 100%;
+}
+
+body {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ot-page-2);
+    background-image: linear-gradient(
+        168deg,
+        var(--ot-page-0) 0%,
+        var(--ot-page-1) 38%,
+        var(--ot-page-2) 72%,
+        #eef2f9 100%
+    );
+    background-attachment: fixed;
+    color: #1e293b;
+}
+
+.container-fluid.mt-3 {
+    flex: 1;
+}
+
+/* Cards & panels: clearly above the page background */
+.card {
+    background-color: var(--ot-surface) !important;
+    border: 1px solid var(--ot-edge-soft) !important;
+    box-shadow: var(--ot-shadow-sm);
+}
+
+.card.shadow-sm {
+    box-shadow: var(--ot-shadow) !important;
+}
+
+.card-header,
+.card-header.bg-white {
+    background: linear-gradient(
+        to bottom,
+        var(--ot-surface-bright) 0%,
+        var(--ot-surface) 100%
+    ) !important;
+    border-bottom: 1px solid var(--ot-edge-soft) !important;
+}
+
+.card-body {
+    background-color: var(--ot-surface);
+}
+
+/* Tables: slight separation from card body */
+.table {
+    --bs-table-bg: transparent;
+}
+
+.table-bordered {
+    border-color: var(--ot-edge-soft) !important;
+}
+
+.table > :not(caption) > * > * {
+    box-shadow: none;
+}
+
+thead.table-light th {
+    background-color: #e8edf5 !important;
+    color: #334155;
+    border-color: var(--ot-edge-soft) !important;
+}
+
+/* Footer */
+footer.footer.bg-light {
+    background: rgba(255, 255, 255, 0.78) !important;
+    border-top: 1px solid var(--ot-edge-soft) !important;
+    backdrop-filter: blur(8px);
+}
+
+/* Form controls: clearer edges on tinted background */
+.form-control,
+.form-select {
+    border-color: rgba(15, 23, 42, 0.14);
+    background-color: var(--ot-surface-bright);
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: rgba(13, 110, 253, 0.45);
+    background-color: #fff;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.12);
+}
+
+/* Standalone simple pages (change password, etc.) */
+.ot-simple-panel {
+    background: var(--ot-surface);
+    border: 1px solid var(--ot-edge-soft);
+    border-radius: 0.5rem;
+    box-shadow: var(--ot-shadow-sm);
+    padding: 1.5rem;
+}
+
+/* Context menus / floating popovers */
+.ot-floating-panel {
+    background: var(--ot-surface-bright);
+    border: 1px solid var(--ot-edge);
+    border-radius: 0.375rem;
+    box-shadow: var(--ot-shadow);
+}

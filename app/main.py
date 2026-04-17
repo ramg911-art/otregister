@@ -21,7 +21,7 @@ from app.database import (
 )
 from app.models import Base, OTRegister, IOLMaster, User
 from app.auth import router as auth_router, require_login, require_module
-from app.roles import coerce_stored_role
+from app.roles import coerce_stored_role, is_administrator, ROLE_ADMINISTRATOR
 from app.permission_middleware import PermissionLoaderMiddleware
 from app.permissions_service import (
     seed_role_permissions_if_empty,
@@ -766,6 +766,7 @@ def user_management(
     tried_username = request.query_params.get("tried", "")
     constraint_hint = request.query_params.get("constraint", "")
     db_users_at_error = request.query_params.get("db_users", "")
+    role_updated = request.query_params.get("role_updated")
     # Show which DB we're connected to (help debug otregister vs tregister)
     db_name = None
     try:
@@ -786,8 +787,38 @@ def user_management(
             "constraint_hint": constraint_hint,
             "db_users_at_error": db_users_at_error,
             "db_name": db_name,
+            "role_updated": role_updated,
         },
     )
+
+
+@app.post("/admin/users/{user_id}/role")
+def update_user_role(
+    user_id: int,
+    role: str = Form(...),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_module("admin_users")),
+):
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_role = coerce_stored_role(role)
+    if is_administrator(target) and new_role != ROLE_ADMINISTRATOR:
+        other_admin = False
+        for u in db.query(User).filter(User.id != user_id).all():
+            if is_administrator(u):
+                other_admin = True
+                break
+        if not other_admin:
+            return RedirectResponse(
+                "/admin/users?error=last_admin",
+                status_code=303,
+            )
+
+    target.role = new_role
+    db.commit()
+    return RedirectResponse("/admin/users?role_updated=1", status_code=303)
 
 
 @app.post("/admin/users/create")

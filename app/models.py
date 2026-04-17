@@ -103,6 +103,9 @@ class PatientFeedback(Base):
     rating = Column(Integer, nullable=True)  # 1–5
     comments = Column(Text, nullable=True)
 
+    # "correct" | "incorrect" — medicine administration
+    medicine_administration = Column(String(16), nullable=True)
+
     created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)
 

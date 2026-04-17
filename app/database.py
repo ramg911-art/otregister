@@ -271,3 +271,48 @@ def ensure_ot_register_patient_contact_columns(engine):
             conn.execute(
                 text(f"ALTER TABLE public.{table} ADD COLUMN patient_emr_id VARCHAR(50)")
             )
+
+
+def ensure_patient_feedback_medicine_column(engine):
+    """Add medicine_administration to patient_feedback if missing."""
+    from sqlalchemy import text
+
+    table = "patient_feedback"
+    with engine.begin() as conn:
+        if engine.url.drivername == "sqlite":
+            try:
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            except Exception:
+                return
+            if not rows:
+                return
+            col_names = {row[1] for row in rows}
+            if "medicine_administration" not in col_names:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD COLUMN medicine_administration VARCHAR(16)"
+                    )
+                )
+            return
+
+        def _has_col(column_name: str) -> bool:
+            n = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = :t AND column_name = :c
+                    """
+                ),
+                {"t": table, "c": column_name},
+            ).scalar()
+            return int(n or 0) > 0
+
+        try:
+            if not _has_col("medicine_administration"):
+                conn.execute(
+                    text(
+                        f"ALTER TABLE public.{table} ADD COLUMN medicine_administration VARCHAR(16)"
+                    )
+                )
+        except Exception:
+            pass

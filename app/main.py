@@ -16,6 +16,7 @@ from app.database import (
     reset_id_sequence,
     SessionLocal,
     ensure_ot_register_patient_contact_columns,
+    ensure_patient_feedback_medicine_column,
 )
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
@@ -58,6 +59,7 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 ensure_ot_register_patient_contact_columns(engine)
+ensure_patient_feedback_medicine_column(engine)
 
 # Fix PostgreSQL id defaults and sequences at startup (after SQLite→PG migration)
 # Fixes "null value in column id violates not-null" and duplicate key on id
@@ -192,12 +194,13 @@ def patient_feedback_page(
         .order_by(OTRegister.id.asc())
         .all()
     )
+    record_phones = phones_for_ot_dashboard_records(records)
+
     ot_ids = [r.id for r in records]
     feedback_map = {}
     if ot_ids:
         rows = (
             db.query(PatientFeedback)
-            .options(joinedload(PatientFeedback.call_marked_by))
             .filter(PatientFeedback.ot_register_id.in_(ot_ids))
             .all()
         )
@@ -208,6 +211,7 @@ def patient_feedback_page(
         {
             "request": request,
             "records": records,
+            "record_phones": record_phones,
             "feedback_map": feedback_map,
             "selected_date": selected_date,
             "current_user": current_user,
@@ -245,6 +249,11 @@ async def patient_feedback_save(
     rating_raw = form.get("rating")
     comments = (form.get("comments") or "").strip()[:2000]
 
+    med_raw = (form.get("medicine_administration") or "").strip().lower()
+    medicine_administration = (
+        med_raw if med_raw in ("correct", "incorrect") else None
+    )
+
     rating = None
     if rating_raw not in (None, ""):
         try:
@@ -267,6 +276,7 @@ async def patient_feedback_save(
 
     fb.feedback_call_done = call_done
     fb.call_marked_by_user_id = user_id if call_done else None
+    fb.medicine_administration = medicine_administration
     fb.rating = rating
     fb.comments = comments if comments else None
     fb.updated_at = now

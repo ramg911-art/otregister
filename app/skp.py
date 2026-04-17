@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from bs4 import BeautifulSoup
+from datetime import date, datetime
 
 # --------------------------------------------------
 # Config
@@ -119,10 +120,79 @@ def fetch_patient(patient_id: str):
     if not name_input:
         return None
 
+    details = _extract_patient_details_from_soup(soup)
+    details["patient_id"] = patient_id
+    if not details.get("patient_name"):
+        details["patient_name"] = name_input.get("value", "").strip()
+    return details
+
+
+def _extract_input_value(soup: BeautifulSoup, field_names: list[str]) -> str:
+    for field in field_names:
+        tag = soup.find("input", {"name": field}) or soup.find("select", {"name": field})
+        if not tag:
+            continue
+        if tag.name == "select":
+            selected = tag.find("option", selected=True) or tag.find("option")
+            if selected:
+                return (selected.get_text() or "").strip()
+        value = tag.get("value", "")
+        if value:
+            return value.strip()
+    return ""
+
+
+def _compute_age_from_dob(dob_value: str) -> str:
+    if not dob_value:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            dob = datetime.strptime(dob_value.strip(), fmt).date()
+            today = date.today()
+            years = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            return str(max(years, 0))
+        except ValueError:
+            continue
+    return ""
+
+
+def _extract_patient_details_from_soup(soup: BeautifulSoup) -> dict:
+    patient_name = _extract_input_value(soup, ["patient_name", "name"])
+    gender = _extract_input_value(soup, ["gender", "sex", "patient_gender"])
+    phone = _extract_input_value(
+        soup,
+        ["phone", "mobile", "mobile_no", "mobile_number", "contact_no", "patient_mobile"],
+    )
+    age = _extract_input_value(soup, ["age", "patient_age"])
+    if not age:
+        dob = _extract_input_value(soup, ["dob", "date_of_birth", "birth_date"])
+        age = _compute_age_from_dob(dob)
+
     return {
-        "patient_id": patient_id,
-        "patient_name": name_input.get("value", "").strip()
+        "patient_name": patient_name,
+        "gender": gender,
+        "phone": phone,
+        "age": age,
     }
+
+
+def fetch_patient_details(session: requests.Session, patient_id: str) -> dict:
+    if not patient_id:
+        return {}
+
+    url = f"{BASE_URLS['SKP']}/admin/patient/{patient_id}"
+    try:
+        r = session.get(url, timeout=10)
+    except Exception:
+        return {}
+
+    if r.status_code != 200 or not r.text:
+        return {}
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    details = _extract_patient_details_from_soup(soup)
+    details["patient_id"] = patient_id
+    return details
 
 # app/skp.py
 def search_global_patient(query: str):
@@ -190,12 +260,22 @@ def search_patient_by_number(query: str):
             except Exception:
                 pass
 
-        results.append({
+        result = {
             "label": text,
             "name": name.strip(),
             "uhid": uhid,
             "patient_id": patient_id
-        })
+        }
+        # Enrich with details available in patient profile page.
+        details = fetch_patient_details(session, patient_id) if patient_id else {}
+        if details:
+            if details.get("patient_name"):
+                result["name"] = details["patient_name"]
+            result["age"] = details.get("age", "")
+            result["gender"] = details.get("gender", "")
+            result["phone"] = details.get("phone", "")
+
+        results.append(result)
 
     return results
 def search_global_patient(query: str):

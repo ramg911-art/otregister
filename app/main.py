@@ -228,6 +228,21 @@ def new_ot(
             "current_user": current_user,
         },
     )
+
+@app.get("/test/patient-search")
+def patient_search_test(
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(require_login),
+):
+    current_user = db.query(User).filter(User.id == user_id).first()
+    return templates.TemplateResponse(
+        "patient_search_test.html",
+        {
+            "request": request,
+            "current_user": current_user,
+        },
+    )
 # --------------------------------------------------
 # Save OT Entry
 # --------------------------------------------------

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Search Test{% endblock %}
+
+{% block head %}
+<style>
+    .card {
+        border-radius: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Patient Search Test</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Search Patient (same API as Post Case)</label>
+                    <input
+                        type="text"
+                        id="patient_search"
+                        class="form-control"
+                        placeholder="Type UHID or patient name"
+                        autocomplete="off"
+                    >
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle">
+                        <thead>
+                            <tr>
+                                <th>UHID</th>
+                                <th>Name</th>
+                                <th>Age</th>
+                                <th>Gender</th>
+                                <th>Phone / Mobile</th>
+                            </tr>
+                        </thead>
+                        <tbody id="patient_rows">
+                            <tr>
+                                <td colspan="5" class="text-muted text-center">Type at least 2 characters to search</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let debounceTimer = null;
+
+const searchInput = document.getElementById("patient_search");
+const rowsBody = document.getElementById("patient_rows");
+
+function safeValue(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    return String(value);
+}
+
+function renderRows(data) {
+    rowsBody.innerHTML = "";
+
+    if (!Array.isArray(data) || data.length === 0) {
+        rowsBody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No patients found</td></tr>';
+        return;
+    }
+
+    data.forEach((p) => {
+        const tr = document.createElement("tr");
+        const phone = p.phone ?? p.mobile ?? p.mobile_number ?? p.phone_number;
+
+        tr.innerHTML = `
+            <td>${safeValue(p.uhid)}</td>
+            <td>${safeValue(p.name ?? p.patient_name)}</td>
+            <td>${safeValue(p.age)}</td>
+            <td>${safeValue(p.gender)}</td>
+            <td>${safeValue(phone)}</td>
+        `;
+
+        rowsBody.appendChild(tr);
+    });
+}
+
+searchInput.addEventListener("input", function () {
+    clearTimeout(debounceTimer);
+    const query = this.value.trim();
+
+    if (query.length < 2) {
+        rowsBody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">Type at least 2 characters to search</td></tr>';
+        return;
+    }
+
+    debounceTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`/api/patient/search?q=${encodeURIComponent(query)}`);
+            const data = await res.json();
+            renderRows(data);
+        } catch (err) {
+            console.error(err);
+            rowsBody.innerHTML = '<tr><td colspan="5" class="text-danger text-center">Search failed</td></tr>';
+        }
+    }, 300);
+});
+</script>
+{% endblock %}

@@ -208,23 +208,6 @@ def _extract_patient_details_from_soup(soup: BeautifulSoup) -> dict:
     }
 
 
-def _unwrap_patient_info_payload(data) -> dict:
-    """EMR getPatientInfo may return the patient object at top level or under data/patient."""
-    if not isinstance(data, dict):
-        return {}
-    if data.get("success") is False and not any(
-        k in data for k in ("patient_name", "uhid", "phone", "data", "patient")
-    ):
-        return {}
-    for key in ("patient", "data", "result", "info"):
-        inner = data.get(key)
-        if isinstance(inner, dict):
-            return inner
-        if isinstance(inner, list) and inner and isinstance(inner[0], dict):
-            return inner[0]
-    return data
-
-
 def _extract_phone_from_dict(d: dict) -> str:
     if not isinstance(d, dict):
         return ""
@@ -250,6 +233,124 @@ def _extract_gender_from_dict(d: dict) -> str:
         if v is not None and str(v).strip():
             return _normalize_gender(str(v).strip())
     return ""
+
+
+def _apply_label_value(out: dict, label: str, val: str) -> None:
+    label = (label or "").lower().strip()
+    val = re.sub(r"\s+", " ", (val or "")).strip()
+    if not label or not val:
+        return
+    if any(x in label for x in ("phone", "mobile", "contact")):
+        out["phone"] = val
+    elif "gender" in label or label in ("sex", "m / f"):
+        out["gender"] = _normalize_gender(val)
+    elif any(x in label for x in ("uhid", "op no", "op number", "mr no", "mrn")):
+        out["uhid"] = val
+    elif "patient name" in label or label in ("name", "patient"):
+        out["patient_name"] = val
+
+
+def _extract_from_patient_popover_html(html: str) -> dict:
+    """
+    getPatientInfo returns JSON where values include HTML (e.g. patient_popover)
+    with class table_pat_info — label / : / value cells.
+    """
+    out: dict = {"patient_name": "", "uhid": "", "phone": "", "gender": ""}
+    if not html or "<" not in html:
+        return out
+
+    soup = BeautifulSoup(html, "html.parser")
+    for tr in soup.find_all("tr"):
+        th = tr.find("th")
+        tds = tr.find_all("td")
+        if th and tds:
+            raw_label = th.get_text(" ", strip=True)
+            val = tds[-1].get_text(" ", strip=True)
+            _apply_label_value(out, raw_label, val)
+            continue
+
+        cells = tds
+        if len(cells) < 3:
+            continue
+        raw_label = cells[0].get_text(" ", strip=True)
+        val = cells[2].get_text(" ", strip=True)
+        _apply_label_value(out, raw_label, val)
+
+        # Wide rows: two label:value groups (label : val | label : val)
+        if len(cells) >= 6:
+            raw2 = cells[3].get_text(" ", strip=True)
+            val2 = cells[5].get_text(" ", strip=True)
+            _apply_label_value(out, raw2, val2)
+
+    return out
+
+
+def _merge_patient_info_from_response_json(data: dict) -> dict:
+    """Merge flat JSON fields and HTML fragments (patient_popover, etc.)."""
+    merged = {
+        "patient_name": "",
+        "uhid": "",
+        "phone": "",
+        "gender": "",
+    }
+
+    html_keys = (
+        "patient_popover",
+        "results",
+        "html",
+        "content",
+        "popover",
+        "patient_html",
+    )
+    for key in html_keys:
+        frag = data.get(key)
+        if isinstance(frag, str) and "<table" in frag:
+            h = _extract_from_patient_popover_html(frag)
+            for k in merged:
+                if h.get(k) and not merged[k]:
+                    merged[k] = h[k]
+
+    for _k, v in data.items():
+        if (
+            isinstance(v, str)
+            and len(v) > 80
+            and "<table" in v
+            and ("table_pat_info" in v or "patient-details-pop" in v)
+        ):
+            h = _extract_from_patient_popover_html(v)
+            for k in merged:
+                if h.get(k) and not merged[k]:
+                    merged[k] = h[k]
+
+    inner = data
+    for wrap in ("patient", "data", "result", "info"):
+        x = data.get(wrap)
+        if isinstance(x, dict):
+            inner = x
+            break
+        if isinstance(x, list) and x and isinstance(x[0], dict):
+            inner = x[0]
+            break
+
+    if isinstance(inner, dict):
+        p = _extract_phone_from_dict(inner)
+        g = _extract_gender_from_dict(inner)
+        n = inner.get("patient_name") or inner.get("name") or ""
+        u = inner.get("uhid") or inner.get("patient_uhid") or ""
+        if isinstance(n, str):
+            n = n.strip()
+        if isinstance(u, str):
+            u = u.strip()
+        if p and not merged["phone"]:
+            merged["phone"] = p
+        if g and not merged["gender"]:
+            merged["gender"] = g
+        if n and not merged["patient_name"]:
+            merged["patient_name"] = n
+        if u and not merged["uhid"]:
+            merged["uhid"] = u
+
+    return merged
 
 
 def _try_parse_doctor_id_from_emr_html(html: str) -> str:
@@ -338,27 +439,19 @@ def fetch_patient_info_emr_lite(
             data = _safe_json(r)
             if not isinstance(data, dict):
                 continue
-            inner = _unwrap_patient_info_payload(data)
-            if not inner:
-                continue
-            phone = _extract_phone_from_dict(inner)
-            gender = _extract_gender_from_dict(inner)
-            name = (
-                inner.get("patient_name")
-                or inner.get("name")
-                or ""
-            )
-            if isinstance(name, str):
-                name = name.strip()
-            uhid = inner.get("uhid") or inner.get("patient_uhid") or ""
-            if isinstance(uhid, str):
-                uhid = uhid.strip()
-            if phone or gender or name or uhid:
+
+            merged = _merge_patient_info_from_response_json(data)
+            if (
+                merged.get("phone")
+                or merged.get("gender")
+                or merged.get("patient_name")
+                or merged.get("uhid")
+            ):
                 return {
-                    "patient_name": name,
-                    "uhid": uhid,
-                    "phone": phone,
-                    "gender": gender,
+                    "patient_name": merged.get("patient_name", ""),
+                    "uhid": merged.get("uhid", ""),
+                    "phone": merged.get("phone", ""),
+                    "gender": merged.get("gender", ""),
                 }
 
     return {}

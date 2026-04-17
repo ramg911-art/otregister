@@ -116,20 +116,43 @@ def dashboard(
         .all()
     )
 
-    record_phones = phones_for_ot_dashboard_records(records)
-
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "records": records,
-            "record_phones": record_phones,
             "selected_date": selected_date,
             "current_user": current_user,
             "save_error": error,
             "save_error_message": message or "",
         },
     )
+
+
+@app.get("/api/dashboard/phones")
+def api_dashboard_phones(
+    selected_date: str | None = None,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(require_login),
+):
+    """Phone numbers for OT rows (SKP); called async after dashboard HTML loads."""
+    if not user_id:
+        return {"phones": {}}
+
+    if selected_date:
+        day = datetime.strptime(selected_date, "%Y-%m-%d").date()
+    else:
+        day = date.today()
+
+    records = (
+        db.query(OTRegister)
+        .filter(OTRegister.date_of_surgery == day)
+        .order_by(OTRegister.id.asc())
+        .all()
+    )
+    mapping = phones_for_ot_dashboard_records(records)
+    return {"phones": {str(k): v for k, v in mapping.items()}}
+
 
 @app.post("/ot/{ot_id}/update")
 async def update_ot(

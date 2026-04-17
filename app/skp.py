@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import requests
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
@@ -19,6 +20,29 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 SESSION_PATH = os.path.join(DATA_DIR, "session.json")
 CREDS_PATH = os.path.join(DATA_DIR, "skp_credentials.json")
+
+# In-memory cache: normalized UHID -> (phone, monotonic time). Speeds repeat dashboard/API loads.
+_UHID_PHONE_CACHE: dict[str, tuple[str, float]] = {}
+_PHONE_CACHE_TTL_SEC = 30 * 60
+
+
+def _uhid_cache_key(u: str) -> str:
+    return re.sub(r"\s+", "", (u or "").upper())
+
+
+def _phone_cache_get(uhid: str) -> str | None:
+    key = _uhid_cache_key(uhid)
+    if key not in _UHID_PHONE_CACHE:
+        return None
+    phone, t0 = _UHID_PHONE_CACHE[key]
+    if time.monotonic() - t0 > _PHONE_CACHE_TTL_SEC:
+        del _UHID_PHONE_CACHE[key]
+        return None
+    return phone
+
+
+def _phone_cache_set(uhid: str, phone: str) -> None:
+    _UHID_PHONE_CACHE[_uhid_cache_key(uhid)] = (phone, time.monotonic())
 
 
 # --------------------------------------------------
@@ -618,19 +642,27 @@ def phones_for_ot_dashboard_records(records) -> dict[int, str]:
         if u in cache:
             out[r.id] = cache[u]
             continue
+        cached_phone = _phone_cache_get(u)
+        if cached_phone is not None:
+            cache[u] = cached_phone
+            out[r.id] = cached_phone
+            continue
         try:
             pid = find_patient_id_for_uhid(session, base, u)
             if not pid:
                 cache[u] = ""
                 out[r.id] = ""
+                _phone_cache_set(u, "")
                 continue
             det = fetch_patient_details(session, pid)
             phone = (det.get("phone") or "").strip()
             cache[u] = phone
             out[r.id] = phone
+            _phone_cache_set(u, phone)
         except Exception:
             cache[u] = ""
             out[r.id] = ""
+            _phone_cache_set(u, "")
 
     return out
 

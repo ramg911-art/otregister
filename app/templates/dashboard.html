@@ -54,7 +54,7 @@
                 <td>{{ r.date_of_surgery.strftime('%d/%m/%Y') }}</td>
                 <td>{{ r.patient_uhid }}</td>
                 <td>{{ r.patient_name }}</td>
-                <td>{{ record_phones.get(r.id, '') or '—' }}</td>
+                <td class="ot-phone-cell text-muted small" data-ot-id="{{ r.id }}">Loading…</td>
                 <td>{{ r.eye }}</td>
                 <td>{{ r.surgery }}</td>
                 <td>{{ r.iol.iol_name if r.iol else '' }}</td>
@@ -128,5 +128,31 @@ document.addEventListener("click", () => {
 document.addEventListener("scroll", () => {
     document.getElementById("rowContextMenu").style.display = "none";
 });
+
+(function () {
+    const cells = document.querySelectorAll(".ot-phone-cell[data-ot-id]");
+    if (!cells.length) return;
+
+    const params = new URLSearchParams({ selected_date: "{{ selected_date }}" });
+    fetch("/api/dashboard/phones?" + params.toString())
+        .then((res) => res.json())
+        .then((data) => {
+            const phones = (data && data.phones) || {};
+            cells.forEach((td) => {
+                const id = td.getAttribute("data-ot-id");
+                const p =
+                    phones[id] !== undefined ? phones[id] : phones[String(id)];
+                const s = p != null ? String(p).trim() : "";
+                td.textContent = s ? s : "—";
+                td.classList.remove("text-muted");
+            });
+        })
+        .catch(() => {
+            cells.forEach((td) => {
+                td.textContent = "—";
+                td.classList.remove("text-muted");
+            });
+        });
+})();
 </script>
 {% endblock %}

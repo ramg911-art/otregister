@@ -29,6 +29,18 @@ def load_config():
         return json.load(f)
 
 
+def _normalize_gender(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    numeric_map = {
+        "1": "Male",
+        "2": "Female",
+        "3": "Other",
+    }
+    return numeric_map.get(raw, raw)
+
+
 # --------------------------------------------------
 # Session handling (your logic – simplified)
 # --------------------------------------------------
@@ -188,7 +200,7 @@ def _extract_patient_details_from_soup(soup: BeautifulSoup) -> dict:
 
     return {
         "patient_name": patient_name,
-        "gender": gender,
+        "gender": _normalize_gender(gender),
         "phone": phone,
         "age": age,
     }
@@ -211,6 +223,145 @@ def fetch_patient_details(session: requests.Session, patient_id: str) -> dict:
     details = _extract_patient_details_from_soup(soup)
     details["patient_id"] = patient_id
     return details
+
+
+def _safe_json(response: requests.Response):
+    try:
+        return response.json()
+    except Exception:
+        return None
+
+
+def _extract_patient_list(data) -> list:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in ("patients", "data", "patient_list", "result", "results", "records"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _extract_bearer_token(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    for key in ("token", "access_token", "auth_token"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        for key in ("token", "access_token", "auth_token"):
+            value = nested.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _emr_api_login(session: requests.Session, base: str, email: str, password: str) -> str:
+    url = f"{base}/mobile_emr_apis/login"
+    payloads = [
+        {"email": email, "password": password},
+        {"username": email, "password": password},
+        {"user_name": email, "password": password},
+    ]
+
+    for payload in payloads:
+        try:
+            response = session.post(url, data=payload, timeout=10)
+        except Exception:
+            continue
+        if response.status_code != 200:
+            continue
+        token = _extract_bearer_token(_safe_json(response) or {})
+        if token:
+            return token
+    return ""
+
+
+def _map_api_patient_item(item: dict) -> dict:
+    if not isinstance(item, dict):
+        return {}
+
+    patient_name = (
+        item.get("patient_name")
+        or item.get("name")
+        or ""
+    )
+    uhid = item.get("uhid") or item.get("patient_uhid") or ""
+    phone = (
+        item.get("phone")
+        or item.get("mobile")
+        or item.get("mobile_no")
+        or item.get("mobile_number")
+        or ""
+    )
+    gender = (
+        item.get("genderdesc")
+        or item.get("gender_name")
+        or item.get("gender")
+        or ""
+    )
+    patient_id = item.get("patient_id") or item.get("id")
+
+    label_name = str(patient_name).strip()
+    label_uhid = str(uhid).strip()
+    label = f"{label_name} [{label_uhid}]".strip()
+
+    return {
+        "label": label,
+        "name": label_name,
+        "uhid": label_uhid,
+        "patient_id": str(patient_id) if patient_id is not None else None,
+        "phone": str(phone).strip(),
+        "gender": _normalize_gender(str(gender)),
+    }
+
+
+def search_patient_by_mobile_emr_api(query: str) -> list:
+    query = (query or "").strip()
+    if len(query) < 2:
+        return []
+
+    creds = load_config()
+    base = BASE_URLS["SKP"]
+    session = requests.Session()
+    token = _emr_api_login(session, base, creds.get("email", ""), creds.get("password", ""))
+    if not token:
+        return []
+
+    url = f"{base}/mobile_emr_apis/fetchPatientList"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    payload_candidates = [
+        {"search": query},
+        {"query": query},
+        {"keyword": query},
+        {"op_no_search": query},
+        {"uhid": query},
+    ]
+
+    for payload in payload_candidates:
+        try:
+            response = session.post(url, data=payload, headers=headers, timeout=12)
+        except Exception:
+            continue
+        if response.status_code != 200:
+            continue
+
+        data = _safe_json(response)
+        patients = _extract_patient_list(data)
+        mapped = [_map_api_patient_item(item) for item in patients]
+        mapped = [row for row in mapped if row and (row.get("name") or row.get("uhid"))]
+        if mapped:
+            return mapped
+
+    return []
 
 # app/skp.py
 def search_global_patient(query: str):
@@ -306,7 +457,12 @@ def search_global_patient(query: str):
     if len(query) < 2:
         return []
 
-    # Numeric search (UHID / OP No)
+    # Prefer EMR API search (returns phone/gender when available).
+    api_results = search_patient_by_mobile_emr_api(query)
+    if api_results:
+        return api_results
+
+    # Fallback to existing numeric search (UHID / OP No).
     if query.isdigit():
         return search_patient_by_number(query)
 

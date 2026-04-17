@@ -35,14 +35,13 @@
                             <tr>
                                 <th>UHID</th>
                                 <th>Name</th>
-                                <th>Age</th>
                                 <th>Gender</th>
                                 <th>Phone / Mobile</th>
                             </tr>
                         </thead>
                         <tbody id="patient_rows">
                             <tr>
-                                <td colspan="5" class="text-muted text-center">Type at least 2 characters to search</td>
+                                <td colspan="4" class="text-muted text-center">Type at least 2 characters to search</td>
                             </tr>
                         </tbody>
                     </table>
@@ -69,7 +68,7 @@ function renderRows(data) {
     rowsBody.innerHTML = "";
 
     if (!Array.isArray(data) || data.length === 0) {
-        rowsBody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No patients found</td></tr>';
+        rowsBody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No patients found</td></tr>';
         return;
     }
 
@@ -80,7 +79,6 @@ function renderRows(data) {
         tr.innerHTML = `
             <td>${safeValue(p.uhid)}</td>
             <td>${safeValue(p.name ?? p.patient_name)}</td>
-            <td>${safeValue(p.age)}</td>
             <td>${safeValue(p.gender)}</td>
             <td>${safeValue(phone)}</td>
         `;
@@ -94,7 +92,7 @@ searchInput.addEventListener("input", function () {
     const query = this.value.trim();
 
     if (query.length < 2) {
-        rowsBody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">Type at least 2 characters to search</td></tr>';
+        rowsBody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Type at least 2 characters to search</td></tr>';
         return;
     }
 
@@ -105,7 +103,7 @@ searchInput.addEventListener("input", function () {
             renderRows(data);
         } catch (err) {
             console.error(err);
-            rowsBody.innerHTML = '<tr><td colspan="5" class="text-danger text-center">Search failed</td></tr>';
+            rowsBody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">Search failed</td></tr>';
         }
     }, 300);
 });

@@ -23,7 +23,6 @@
     <!-- ===================== -->
     <!-- ADD IOL -->
     <!-- ===================== -->
-    {% if current_user.role == "admin" %}
     <div class="card mb-4">
         <div class="card-body">
             <form method="post" action="/iol/add" class="row g-3">
@@ -59,7 +58,6 @@
             </form>
         </div>
     </div>
-    {% endif %}
 
     <!-- ===================== -->
     <!-- IOL LIST -->
@@ -72,9 +70,7 @@
                     <tr>
                         <th>IOL Name</th>
                         <th>Package</th>
-                        {% if current_user.role == "admin" %}
                         <th width="260">Action</th>
-                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -83,7 +79,6 @@
                         <td>{{ iol.iol_name }}</td>
                         <td>{{ iol.package }}</td>
 
-                        {% if current_user.role == "admin" %}
                         <td>
                             <!-- EDIT -->
                             <form method="post"
@@ -118,7 +113,6 @@
                                 </button>
                             </form>
                         </td>
-                        {% endif %}
                     </tr>
                     {% else %}
                     <tr>

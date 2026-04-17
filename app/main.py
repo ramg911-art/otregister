@@ -17,9 +17,24 @@ from app.database import (
     SessionLocal,
     ensure_ot_register_patient_contact_columns,
     ensure_patient_feedback_medicine_column,
+    migrate_legacy_user_roles,
 )
-from app.models import Base, OTRegister, IOLMaster
-from app.auth import router as auth_router, require_login
+from app.models import Base, OTRegister, IOLMaster, User
+from app.auth import router as auth_router, require_login, require_module
+from app.roles import coerce_stored_role
+from app.permission_middleware import PermissionLoaderMiddleware
+from app.permissions_service import (
+    seed_role_permissions_if_empty,
+    module_allowed,
+    default_landing_path,
+    replace_matrix_for_roles,
+    matrix_checkbox_state,
+)
+from app.permission_modules import (
+    MODULE_DEFINITIONS,
+    MATRIX_ROLE_KEYS,
+    ALL_MATRIX_MODULE_KEYS,
+)
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
 from app.skp import (
     fetch_patient,
@@ -52,12 +67,22 @@ from sqlalchemy.exc import IntegrityError
 # --------------------------------------------------
 app = FastAPI(title="OT Register")
 
+app.add_middleware(PermissionLoaderMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key="CHANGE_THIS_TO_A_RANDOM_SECRET"
 )
 
 Base.metadata.create_all(bind=engine)
+migrate_legacy_user_roles(engine)
+try:
+    _seed_db = SessionLocal()
+    try:
+        seed_role_permissions_if_empty(_seed_db)
+    finally:
+        _seed_db.close()
+except Exception:
+    pass
 ensure_ot_register_patient_contact_columns(engine)
 ensure_patient_feedback_medicine_column(engine)
 
@@ -93,6 +118,17 @@ def format_date(value):
     return value
 
 templates.env.filters["datefmt"] = format_date
+
+
+def template_user_can(request: Request, module_key: str) -> bool:
+    allowed = getattr(request.state, "allowed_modules", None)
+    if not allowed:
+        return False
+    return module_key in allowed
+
+
+templates.env.globals["user_can"] = template_user_can
+
 # --------------------------------------------------
 # Auth routes
 # --------------------------------------------------
@@ -118,10 +154,8 @@ def dashboard(
     error: str | None = None,
     message: str | None = None,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    current_user: User = Depends(require_module("dashboard")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
-
     if selected_date:
         day = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
@@ -150,12 +184,16 @@ def dashboard(
 
 @app.get("/api/dashboard/phones")
 def api_dashboard_phones(
+    request: Request,
     selected_date: str | None = None,
     db: Session = Depends(get_db),
-    user_id: int | None = Depends(require_login),
 ):
     """Phone numbers for OT rows (SKP); called async after dashboard HTML loads."""
-    if not user_id:
+    uid = request.session.get("user_id")
+    if not uid:
+        return {"phones": {}}
+    u = db.query(User).filter(User.id == uid).first()
+    if not u or not module_allowed(db, u, "dashboard"):
         return {"phones": {}}
 
     if selected_date:
@@ -178,10 +216,8 @@ def patient_feedback_page(
     request: Request,
     selected_date: str | None = None,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    current_user: User = Depends(require_module("patient_feedback")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
-
     if selected_date:
         day = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
@@ -223,8 +259,9 @@ def patient_feedback_page(
 async def patient_feedback_save(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    actor: User = Depends(require_module("patient_feedback")),
 ):
+    user_id = actor.id
     form = await request.form()
     selected_date = (form.get("selected_date") or "").strip()
     ot_raw = form.get("ot_id")
@@ -296,7 +333,7 @@ async def update_ot(
     ot_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    _clinical: User = Depends(require_module("post_case")),
 ):
     record = db.query(OTRegister).filter(OTRegister.id == ot_id).first()
     if not record:
@@ -325,7 +362,7 @@ async def delete_ot(
     ot_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    _clinical: User = Depends(require_module("post_case")),
 ):
     form = await request.form()
     selected_date = form.get("selected_date")
@@ -349,13 +386,13 @@ def edit_ot(
     ot_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    clinical_user: User = Depends(require_module("post_case")),
 ):
     record = db.query(OTRegister).filter(OTRegister.id == ot_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="OT record not found")
 
-    current_user = db.query(User).filter(User.id == user_id).first()
+    current_user = clinical_user
     iols = db.query(IOLMaster).all()
 
     return templates.TemplateResponse(
@@ -374,9 +411,9 @@ def edit_ot(
 def new_ot(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    clinical_user: User = Depends(require_module("post_case")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
+    current_user = clinical_user
 
     iols = db.query(IOLMaster).all()
     drugs = db.query(IntravitrealDrugMaster).order_by(
@@ -397,9 +434,9 @@ def new_ot(
 def patient_search_test(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    clinical_user: User = Depends(require_module("devtools")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
+    current_user = clinical_user
     return templates.TemplateResponse(
         "patient_search_test.html",
         {
@@ -412,9 +449,9 @@ def patient_search_test(
 def patient_search_test_html(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    clinical_user: User = Depends(require_module("devtools")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
+    current_user = clinical_user
     return templates.TemplateResponse(
         "patient_search_test.html",
         {
@@ -476,7 +513,7 @@ def _apply_patient_contact_from_form(record: OTRegister, form) -> None:
 @app.post("/ot/save")
 async def save_ot(
     request: Request,
-    user_id: int = Depends(require_login),
+    _clinical: User = Depends(require_module("post_case")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -552,8 +589,14 @@ async def save_ot(
 # Root & favicon
 # --------------------------------------------------
 @app.get("/")
-def root():
-    return RedirectResponse("/dashboard")
+def root(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get("user_id")
+    if not uid:
+        return RedirectResponse("/login", status_code=302)
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse(default_landing_path(db, user), status_code=302)
 
 
 @app.get("/favicon.ico")
@@ -571,17 +614,17 @@ from app.skp import search_global_patient
 @app.get("/api/patient/search")
 def api_patient_search(
     q: str,
-    user_id: int | None = Depends(require_login)
+    clinical_user: User = Depends(require_module("post_case")),
 ):
-    if not user_id:
-        return []
-
     return search_global_patient(q)
 # -----------------------------
 # API: distinct patient categories (for sort-order setup)
 # -----------------------------
 @app.get("/api/categories")
-def api_distinct_categories(db: Session = Depends(get_db)):
+def api_distinct_categories(
+    db: Session = Depends(get_db),
+    _u: User = Depends(require_module("post_case")),
+):
     """Return all distinct patient category values in the database (sorted)."""
     rows = db.query(OTRegister.category).distinct().all()
     categories = sorted({r[0].strip() for r in rows if r[0] and r[0].strip()})
@@ -595,9 +638,8 @@ def api_distinct_categories(db: Session = Depends(get_db)):
 def iol_master(
     request: Request,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    current_user: User = Depends(require_module("iol_master")),
 ):
-    current_user = db.query(User).filter(User.id == user_id).first()
 
     iols = db.query(IOLMaster).order_by(IOLMaster.iol_name.asc()).all()
 
@@ -622,12 +664,9 @@ def add_iol(
     request: Request,
     name: str = Form(...),
     package: str = Form(...),
-    user_id: int | None = Depends(require_login),
-    db: Session = Depends(get_db)
+    _iol: User = Depends(require_module("iol_master")),
+    db: Session = Depends(get_db),
 ):
-    if not user_id:
-        return RedirectResponse("/login", status_code=302)
-
     nm = (name or "").strip()
     pkg = (package or "").strip()
     if not nm or not pkg:
@@ -679,12 +718,8 @@ def edit_iol(
     name: str = Form(...),
     package: str = Form(...),
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    _iol: User = Depends(require_module("iol_master")),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-
     iol = db.query(IOLMaster).filter(IOLMaster.id == iol_id).first()
     if not iol:
         raise HTTPException(status_code=404, detail="IOL not found")
@@ -703,12 +738,8 @@ def edit_iol(
 def delete_iol(
     iol_id: int,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    _iol: User = Depends(require_module("iol_master")),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-
     iol = db.query(IOLMaster).filter(IOLMaster.id == iol_id).first()
     if not iol:
         raise HTTPException(status_code=404, detail="IOL not found")
@@ -719,7 +750,6 @@ def delete_iol(
     return RedirectResponse("/iol", status_code=303)
 
 from app.models import User
-from app.auth import require_admin
 from app.auth import hash_password, verify_password
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
@@ -727,7 +757,7 @@ from sqlalchemy import text
 def user_management(
     request: Request,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_users")),
 ):
     users = db.query(User).all()
     error = request.query_params.get("error")
@@ -764,12 +794,12 @@ def user_management(
 async def create_user(
     request: Request,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_users")),
 ):
     form = await request.form()
     username = (form.get("username") or "").strip()
     password = form.get("password") or ""
-    role = (form.get("role") or "staff").strip()
+    role = coerce_stored_role((form.get("role") or "").strip() or None)
 
     if not username or not password:
         return RedirectResponse(
@@ -781,7 +811,7 @@ async def create_user(
     user = User(
         username=username,
         password_hash=hash_password(password),
-        role=role if role in ("staff", "admin") else "staff",
+        role=role,
     )
     db.add(user)
     try:
@@ -802,7 +832,7 @@ async def create_user(
                 user2 = User(
                     username=username,
                     password_hash=hash_password(password),
-                    role=role if role in ("staff", "admin") else "staff",
+                    role=role,
                 )
                 db.add(user2)
                 db.commit()
@@ -852,7 +882,7 @@ async def create_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_users")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if user:
@@ -864,7 +894,7 @@ def delete_user(
 @app.get("/change-password")
 def change_password_page(
     request: Request,
-    user_id: int = Depends(require_login),
+    _user: User = Depends(require_module("account_password")),
 ):
     return templates.TemplateResponse(
         "change_password.html",
@@ -876,7 +906,7 @@ def reset_user_password(
     user_id: int,
     new_password: str = Form(...),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),  # 🔐 admin only
+    admin: User = Depends(require_module("admin_users")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
 
@@ -894,7 +924,7 @@ def reset_user_password(
 @app.post("/change-password")
 async def change_password(
     request: Request,
-    user_id: int = Depends(require_login),
+    actor: User = Depends(require_module("account_password")),
     db: Session = Depends(get_db),
 ):
     form = await request.form()
@@ -903,11 +933,10 @@ async def change_password(
     if not new_password:
         raise HTTPException(status_code=400, detail="Password required")
 
-    user = db.query(User).filter(User.id == user_id).first()
-    user.password_hash = hash_password(new_password)
+    actor.password_hash = hash_password(new_password)
     db.commit()
 
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse(default_landing_path(db, actor), status_code=303)
 from fastapi import Form
 from sqlalchemy.exc import IntegrityError
 
@@ -918,7 +947,7 @@ from sqlalchemy.exc import IntegrityError
 def drug_master(
     request: Request,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_drugs")),
 ):
     drugs = db.query(IntravitrealDrugMaster).order_by(
         IntravitrealDrugMaster.drug_name
@@ -938,7 +967,7 @@ def drug_master(
 def add_drug(
     drug_name: str = Form(...),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_drugs")),
 ):
     drug = IntravitrealDrugMaster(
         drug_name=drug_name.strip()
@@ -960,27 +989,7 @@ def add_drug(
 def delete_drug(
     drug_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    drug = db.query(IntravitrealDrugMaster).filter(
-        IntravitrealDrugMaster.id == drug_id
-    ).first()
-
-    if drug:
-        db.delete(drug)
-        db.commit()
-
-    return RedirectResponse(
-        "/admin/drugs",
-        status_code=303
-    )
-
-
-@app.post("/admin/drugs/{drug_id}/delete")
-def delete_drug(
-    drug_id: int,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_drugs")),
 ):
     drug = db.query(IntravitrealDrugMaster).filter(
         IntravitrealDrugMaster.id == drug_id
@@ -1129,7 +1138,7 @@ def _dashboard_stats_for_period(db, date_from, date_to):
 def admin_dashboard_page(
     request: Request,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_dashboard")),
 ):
     return templates.TemplateResponse(
         "admin_dashboard.html",
@@ -1140,7 +1149,7 @@ def admin_dashboard_page(
 @app.get("/admin/dashboard/api/stats")
 def admin_dashboard_api(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_module("admin_dashboard")),
     range_type: str = "mtd",
     from_date: str | None = None,
     to_date: str | None = None,
@@ -1174,6 +1183,53 @@ def admin_dashboard_api(
         "top_iols": stats["top_iols"],
         "category_counts": stats["category_counts"],
     })
+
+
+@app.get("/admin/permissions")
+def admin_permissions_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    editor: User = Depends(require_module("admin_permissions")),
+):
+    matrix = matrix_checkbox_state(db)
+    sections: dict[str, list] = {}
+    for m in MODULE_DEFINITIONS:
+        sections.setdefault(m.section, []).append(m)
+    saved = request.query_params.get("saved")
+    role_labels = {
+        "optometrist": "Optometrist",
+        "feedback_user": "Feedback user",
+    }
+    return templates.TemplateResponse(
+        "admin_permissions.html",
+        {
+            "request": request,
+            "current_user": editor,
+            "matrix": matrix,
+            "sections": sections,
+            "matrix_roles": MATRIX_ROLE_KEYS,
+            "role_labels": role_labels,
+            "saved": saved,
+        },
+    )
+
+
+@app.post("/admin/permissions/save")
+async def admin_permissions_save(
+    request: Request,
+    db: Session = Depends(get_db),
+    editor: User = Depends(require_module("admin_permissions")),
+):
+    form = await request.form()
+    role_to_allowed: dict[str, set[str]] = {}
+    for role in MATRIX_ROLE_KEYS:
+        keys: set[str] = set()
+        for key in ALL_MATRIX_MODULE_KEYS:
+            if form.get(f"perm_{role}_{key}"):
+                keys.add(key)
+        role_to_allowed[role] = keys
+    replace_matrix_for_roles(db, role_to_allowed)
+    return RedirectResponse("/admin/permissions?saved=1", status_code=303)
 
 
 from collections import defaultdict
@@ -1232,9 +1288,9 @@ def surgery_report(
     to_date: str | None = None,
     preset: str | None = None,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),  # 🔐 already a User object
+    clinical_user: User = Depends(require_module("reports_surgery")),
 ):
-    current_user = admin   # ✅ just reuse it
+    current_user = clinical_user
 
     from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
@@ -1285,10 +1341,8 @@ def surgery_report_excel(
     from_date: str,
     to_date: str,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),  # 🔐 already a User object
+    _clinical: User = Depends(require_module("reports_surgery")),
 ):
-    current_user = admin   # ✅ just reuse it
-
     f_date = datetime.strptime(from_date, "%Y-%m-%d").date()
     t_date = datetime.strptime(to_date, "%Y-%m-%d").date()
 
@@ -1356,10 +1410,8 @@ def surgery_report_pdf(
     from_date: str,
     to_date: str,
     db: Session = Depends(get_db),
-     admin: User = Depends(require_admin),  # 🔐 already a User object
+    _clinical: User = Depends(require_module("reports_surgery")),
 ):
-    current_user = admin   # ✅ just reuse it
-
     # -----------------------------
     # Parse input dates (ISO)
     # -----------------------------
@@ -1474,9 +1526,9 @@ def vue_report(
     to_date: str | None = None,
     preset: str | None = None,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    clinical_user: User = Depends(require_module("reports_vue")),
 ):
-    current_user = admin
+    current_user = clinical_user
 
     from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
@@ -1540,9 +1592,9 @@ def category_iol_report(
     to_date: str | None = None,
     preset: str | None = None,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    clinical_user: User = Depends(require_module("reports_category_iol")),
 ):
-    current_user = admin
+    current_user = clinical_user
 
     from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
@@ -1613,7 +1665,7 @@ def intravitreal_report(
     to_date: str | None = None,
     preset: str | None = None,
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_login),
+    clinical_user: User = Depends(require_module("reports_intravitreal")),
 ):
     from_date, to_date = get_report_dates_from_preset(preset, from_date, to_date)
 
@@ -1656,6 +1708,7 @@ def intravitreal_report(
             "category_totals": dict(category_totals),
             "drug_totals": dict(drug_totals),
             "vue_total": vue_total,
+            "current_user": clinical_user,
         },
     )
 

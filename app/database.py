@@ -273,6 +273,25 @@ def ensure_ot_register_patient_contact_columns(engine):
             )
 
 
+def migrate_legacy_user_roles(engine):
+    """Rename legacy role values to canonical administrator / optometrist."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        try:
+            conn.execute(
+                text("UPDATE users SET role = 'administrator' WHERE role = 'admin'")
+            )
+        except Exception:
+            pass
+        try:
+            conn.execute(
+                text("UPDATE users SET role = 'optometrist' WHERE role = 'staff'")
+            )
+        except Exception:
+            pass
+
+
 def ensure_patient_feedback_medicine_column(engine):
     """Add medicine_administration to patient_feedback if missing."""
     from sqlalchemy import text

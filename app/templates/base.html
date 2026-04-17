@@ -49,92 +49,139 @@
 
         <div class="collapse navbar-collapse" id="navbarMain">
 
+            {% if current_user is defined %}
+                {% set cu = current_user %}
+            {% else %}
+                {% set cu = request.state.current_user %}
+            {% endif %}
+
             <!-- Left menu -->
             <ul class="navbar-nav me-auto">
 
-                {% if current_user %}
+                {% if cu %}
+                {% if user_can(request, 'dashboard') %}
                 <li class="nav-item">
                     <a class="nav-link" href="/dashboard">Dashboard</a>
                 </li>
+                {% endif %}
 
+                {% if user_can(request, 'post_case') %}
                 <li class="nav-item">
                     <a class="nav-link" href="/ot/new">Post Case</a>
                 </li>
+                {% endif %}
 
+                {% if user_can(request, 'patient_feedback') %}
                 <li class="nav-item">
                     <a class="nav-link" href="/patient-feedback">Patient Feedback</a>
                 </li>
+                {% endif %}
 
+                {% if user_can(request, 'reports_surgery') or user_can(request, 'reports_vue') or user_can(request, 'reports_category_iol') or user_can(request, 'reports_intravitreal') %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button"
                        data-bs-toggle="dropdown">
                         Reports
                     </a>
                     <ul class="dropdown-menu">
+                        {% if user_can(request, 'reports_surgery') %}
                         <li>
                             <a class="dropdown-item" href="/reports/surgery">
                                 Surgery List
                             </a>
                         </li>
+                        {% endif %}
+                        {% if user_can(request, 'reports_vue') %}
                         <li>
                             <a class="dropdown-item" href="/reports/vue">
                                 Vue Referral Report
                             </a>
                         </li>
+                        {% endif %}
+                        {% if user_can(request, 'reports_category_iol') %}
                         <li>
                           <a class="dropdown-item" href="/reports/category-iol">
                               Category-wise IOL Report
                           </a>
                       </li>
+                      {% endif %}
+                      {% if user_can(request, 'reports_intravitreal') %}
                       <li>
                             <a class="dropdown-item" href="/reports/intravitreal">
                                 Intravitreal Injection Report
                             </a>
                         </li>
+                        {% endif %}
                     </ul>
                 </li>
                 {% endif %}
 
-                {% if current_user and current_user.role == "admin" %}
+                {% if user_can(request, 'admin_dashboard') or user_can(request, 'admin_users') or user_can(request, 'iol_master') or user_can(request, 'admin_drugs') or user_can(request, 'admin_permissions') %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle text-warning" href="#"
                        role="button" data-bs-toggle="dropdown">
                         Admin
                     </a>
                     <ul class="dropdown-menu">
+                        {% if user_can(request, 'admin_dashboard') %}
                         <li>
                             <a class="dropdown-item" href="/admin/dashboard">
                                 Admin Dashboard
                             </a>
                         </li>
+                        {% endif %}
+                        {% if user_can(request, 'admin_users') %}
                         <li>
                             <a class="dropdown-item" href="/admin/users">
                                 User Management
                             </a>
                         </li>
+                        {% endif %}
+                        {% if user_can(request, 'iol_master') %}
                         <li>
                             <a class="dropdown-item" href="/iol">
                                 IOL Master
                             </a>
                         </li>
+                        {% endif %}
+                        {% if user_can(request, 'admin_drugs') %}
                         <li>
                          <a class="dropdown-item" href="/admin/drugs">
                              Intravitreal Drug Master
                       </a>
                         </li>
-
+                        {% endif %}
+                        {% if user_can(request, 'admin_permissions') %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/permissions">
+                                Role permissions
+                            </a>
+                        </li>
+                        {% endif %}
                     </ul>
                 </li>
+                {% endif %}
+
+                {% if user_can(request, 'devtools') %}
+                <li class="nav-item">
+                    <a class="nav-link text-info" href="/test/patient-search">Dev tools</a>
+                </li>
+                {% endif %}
                 {% endif %}
 
             </ul>
 
             <!-- Right menu -->
-            {% if current_user %}
+            {% if cu %}
             <ul class="navbar-nav ms-auto">
+                {% if user_can(request, 'account_password') %}
+                <li class="nav-item">
+                    <a class="nav-link py-2" href="/change-password">Change password</a>
+                </li>
+                {% endif %}
                 <li class="nav-item">
                     <span class="navbar-text me-3">
-                        {{ current_user.username }}
+                        {{ cu.username }}
                     </span>
                 </li>
                 <li class="nav-item">

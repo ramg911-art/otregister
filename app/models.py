@@ -15,7 +15,17 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    role = Column(String(20), default="staff")
+    role = Column(String(32), default="optometrist")
+
+
+class RolePermission(Base):
+    """Per-role toggles for granular modules (see app.permission_modules)."""
+
+    __tablename__ = "role_permissions"
+
+    role = Column(String(32), primary_key=True)
+    module_key = Column(String(64), primary_key=True)
+    allowed = Column(Boolean, nullable=False, default=False)
 
 
 # --------------------------------------------------

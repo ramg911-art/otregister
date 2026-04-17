@@ -6,6 +6,8 @@ from passlib.context import CryptContext
 
 from app.database import get_db
 from app.models import User
+from app.roles import is_administrator
+from app.permissions_service import default_landing_path, module_allowed
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -47,18 +49,38 @@ def require_admin(
     db: Session = Depends(get_db),
 ) -> User:
     user = db.query(User).filter(User.id == user_id).first()
-    if not user or user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not user or not is_administrator(user):
+        raise HTTPException(status_code=403, detail="Administrator access required")
     return user
+
+
+def require_module(module_key: str):
+    """Require login and a ticked module for the user's role (administrators: all modules)."""
+
+    def _dep(
+        user_id: int = Depends(require_login),
+        db: Session = Depends(get_db),
+    ) -> User:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        if not module_allowed(db, user, module_key):
+            raise HTTPException(status_code=403, detail="Access denied")
+        return user
+
+    return _dep
 
 
 # --------------------------------------------------
 # Login page
 # --------------------------------------------------
 @router.get("/login")
-def login_page(request: Request):
-    if request.session.get("user_id"):
-        return RedirectResponse("/dashboard", status_code=302)
+def login_page(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get("user_id")
+    if uid:
+        user = db.query(User).filter(User.id == uid).first()
+        if user:
+            return RedirectResponse(default_landing_path(db, user), status_code=302)
 
     return templates.TemplateResponse(
         "login.html",
@@ -91,7 +113,7 @@ def login(
     request.session["user_id"] = user.id
     request.session["username"] = user.username
 
-    return RedirectResponse("/dashboard", status_code=302)
+    return RedirectResponse(default_landing_path(db, user), status_code=302)
 
 
 # --------------------------------------------------

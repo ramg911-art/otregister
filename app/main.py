@@ -7,11 +7,25 @@ from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_id_default, reset_ot_register_sequence, reset_id_sequence, SessionLocal
+from app.database import (
+    engine,
+    get_db,
+    fix_postgres_sequence,
+    ensure_postgres_id_default,
+    reset_ot_register_sequence,
+    reset_id_sequence,
+    SessionLocal,
+    ensure_ot_register_patient_contact_columns,
+)
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
-from app.skp import fetch_patient, phones_for_ot_dashboard_records
+from app.skp import (
+    fetch_patient,
+    phones_for_ot_dashboard_records,
+    ensure_logged_in,
+    fetch_patient_details,
+)
 from app.database import engine
 from app.models import Base  # 🔑 THIS IMPORT IS CRITICAL
 from datetime import datetime
@@ -26,10 +40,6 @@ from fastapi import APIRouter
 from app.models import Base, OTRegister, IOLMaster, IntravitrealDrugMaster
 from sqlalchemy.exc import IntegrityError
 
-Base.metadata.create_all(bind=engine)
-
-
-
 # --------------------------------------------------
 # App init
 # --------------------------------------------------
@@ -41,6 +51,7 @@ app.add_middleware(
 )
 
 Base.metadata.create_all(bind=engine)
+ensure_ot_register_patient_contact_columns(engine)
 
 # Fix PostgreSQL id defaults and sequences at startup (after SQLite→PG migration)
 # Fixes "null value in column id violates not-null" and duplicate key on id
@@ -177,7 +188,8 @@ async def update_ot(
     record.date_of_surgery = datetime.strptime(
         form.get("date_of_surgery"), "%Y-%m-%d"
     ).date()
-    record.is_vue = bool(form.get("is_vue")) 
+    record.is_vue = bool(form.get("is_vue"))
+    _apply_patient_contact_from_form(record, form)
     db.commit()
 
     return RedirectResponse("/dashboard", status_code=303)
@@ -321,6 +333,20 @@ def _make_ot_record(form):
     )
 
 
+def _apply_patient_contact_from_form(record: OTRegister, form) -> None:
+    """Store EMR patient id and phone (SKP) from hidden patient_id; same stack as patient search."""
+    emr_pid = (form.get("patient_id") or "").strip()
+    record.patient_emr_id = emr_pid or None
+    record.patient_phone = None
+    if not emr_pid:
+        return
+    try:
+        det = fetch_patient_details(ensure_logged_in(), emr_pid)
+        record.patient_phone = (det.get("phone") or "").strip() or None
+    except Exception:
+        pass
+
+
 @app.post("/ot/save")
 async def save_ot(
     request: Request,
@@ -336,6 +362,8 @@ async def save_ot(
                 f"/dashboard?error=save&message={quote(str(e)[:80])}",
                 status_code=303,
             )
+
+        _apply_patient_contact_from_form(record, form)
 
         # Proactively sync id sequence on PostgreSQL so next id is always MAX(id)+1 (avoids duplicate key after migration or concurrent saves)
         if db.get_bind().url.drivername != "sqlite":
@@ -360,6 +388,7 @@ async def save_ot(
                 db.commit()
                 try:
                     record2 = _make_ot_record(form)
+                    _apply_patient_contact_from_form(record2, form)
                     db.add(record2)
                     db.commit()
                 except Exception as retry_err:

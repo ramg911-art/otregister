@@ -23,6 +23,7 @@ CREDS_PATH = os.path.join(DATA_DIR, "skp_credentials.json")
 
 # In-memory cache: normalized UHID -> (phone, monotonic time). Speeds repeat dashboard/API loads.
 _UHID_PHONE_CACHE: dict[str, tuple[str, float]] = {}
+_EMR_PHONE_CACHE: dict[str, tuple[str, float]] = {}
 _PHONE_CACHE_TTL_SEC = 30 * 60
 
 
@@ -43,6 +44,26 @@ def _phone_cache_get(uhid: str) -> str | None:
 
 def _phone_cache_set(uhid: str, phone: str) -> None:
     _UHID_PHONE_CACHE[_uhid_cache_key(uhid)] = (phone, time.monotonic())
+
+
+def _emr_phone_cache_get(emr_id: str) -> str | None:
+    key = (emr_id or "").strip()
+    if not key:
+        return None
+    if key not in _EMR_PHONE_CACHE:
+        return None
+    phone, t0 = _EMR_PHONE_CACHE[key]
+    if time.monotonic() - t0 > _PHONE_CACHE_TTL_SEC:
+        del _EMR_PHONE_CACHE[key]
+        return None
+    return phone
+
+
+def _emr_phone_cache_set(emr_id: str, phone: str) -> None:
+    key = (emr_id or "").strip()
+    if not key:
+        return
+    _EMR_PHONE_CACHE[key] = (phone, time.monotonic())
 
 
 # --------------------------------------------------
@@ -617,11 +638,11 @@ def find_patient_id_for_uhid(
 
 def phones_for_ot_dashboard_records(records) -> dict[int, str]:
     """
-    For OT list rows: resolve UHID → patient_id via ajax search, then phone via
-    fetch_patient_details (getPatientInfo HTML + admin fallback) — same stack as test search.
+    OT list phones: use DB patient_phone when set; else EMR patient_emr_id + fetch_patient_details;
+    else legacy UHID ajax search + fetch. In-memory TTL cache for EMR/UHID lookups.
     """
     out: dict[int, str] = {}
-    cache: dict[str, str] = {}
+    uhid_row_cache: dict[str, str] = {}
     if not records:
         return out
 
@@ -631,36 +652,60 @@ def phones_for_ot_dashboard_records(records) -> dict[int, str]:
         session.get(f"{base}/emr_lite")
     except Exception:
         for r in records:
-            out[r.id] = ""
+            out[r.id] = (getattr(r, "patient_phone", None) or "").strip()
         return out
 
     for r in records:
+        db_phone = (getattr(r, "patient_phone", None) or "").strip()
+        if db_phone:
+            out[r.id] = db_phone
+            u = (r.patient_uhid or "").strip()
+            if u and _phone_cache_get(u) is None:
+                _phone_cache_set(u, db_phone)
+            continue
+
+        emr = (getattr(r, "patient_emr_id", None) or "").strip()
+        if emr:
+            hit = _emr_phone_cache_get(emr)
+            if hit is not None:
+                out[r.id] = hit
+                continue
+            try:
+                det = fetch_patient_details(session, emr)
+                phone = (det.get("phone") or "").strip()
+                out[r.id] = phone
+                _emr_phone_cache_set(emr, phone)
+            except Exception:
+                out[r.id] = ""
+                _emr_phone_cache_set(emr, "")
+            continue
+
         u = (r.patient_uhid or "").strip()
         if not u:
             out[r.id] = ""
             continue
-        if u in cache:
-            out[r.id] = cache[u]
+        if u in uhid_row_cache:
+            out[r.id] = uhid_row_cache[u]
             continue
         cached_phone = _phone_cache_get(u)
         if cached_phone is not None:
-            cache[u] = cached_phone
+            uhid_row_cache[u] = cached_phone
             out[r.id] = cached_phone
             continue
         try:
             pid = find_patient_id_for_uhid(session, base, u)
             if not pid:
-                cache[u] = ""
+                uhid_row_cache[u] = ""
                 out[r.id] = ""
                 _phone_cache_set(u, "")
                 continue
             det = fetch_patient_details(session, pid)
             phone = (det.get("phone") or "").strip()
-            cache[u] = phone
+            uhid_row_cache[u] = phone
             out[r.id] = phone
             _phone_cache_set(u, phone)
         except Exception:
-            cache[u] = ""
+            uhid_row_cache[u] = ""
             out[r.id] = ""
             _phone_cache_set(u, "")
 

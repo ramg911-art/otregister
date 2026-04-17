@@ -54,7 +54,17 @@
                 <td>{{ r.date_of_surgery.strftime('%d/%m/%Y') }}</td>
                 <td>{{ r.patient_uhid }}</td>
                 <td>{{ r.patient_name }}</td>
-                <td class="ot-phone-cell text-muted small" data-ot-id="{{ r.id }}">Loading…</td>
+                <td
+                    class="ot-phone-cell small"
+                    data-ot-id="{{ r.id }}"
+                    data-fetch-phone="{{ 1 if not r.patient_phone else 0 }}"
+                >
+                    {% if r.patient_phone %}
+                    {{ r.patient_phone }}
+                    {% else %}
+                    <span class="text-muted phone-loading">Loading…</span>
+                    {% endif %}
+                </td>
                 <td>{{ r.eye }}</td>
                 <td>{{ r.surgery }}</td>
                 <td>{{ r.iol.iol_name if r.iol else '' }}</td>
@@ -130,7 +140,9 @@ document.addEventListener("scroll", () => {
 });
 
 (function () {
-    const cells = document.querySelectorAll(".ot-phone-cell[data-ot-id]");
+    const cells = Array.from(
+        document.querySelectorAll(".ot-phone-cell[data-fetch-phone='1']")
+    );
     if (!cells.length) return;
 
     const params = new URLSearchParams({ selected_date: "{{ selected_date }}" });
@@ -143,14 +155,16 @@ document.addEventListener("scroll", () => {
                 const p =
                     phones[id] !== undefined ? phones[id] : phones[String(id)];
                 const s = p != null ? String(p).trim() : "";
-                td.textContent = s ? s : "—";
-                td.classList.remove("text-muted");
+                td.innerHTML = "";
+                td.appendChild(
+                    document.createTextNode(s ? s : "—")
+                );
             });
         })
         .catch(() => {
             cells.forEach((td) => {
-                td.textContent = "—";
-                td.classList.remove("text-muted");
+                td.innerHTML = "";
+                td.appendChild(document.createTextNode("—"));
             });
         });
 })();

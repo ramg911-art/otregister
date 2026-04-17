@@ -227,3 +227,47 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
         _pg_engine_run(db, _do)
     except Exception:
         pass
+
+
+def ensure_ot_register_patient_contact_columns(engine):
+    """
+    Add patient_phone / patient_emr_id to ot_register if missing (SQLite + PostgreSQL).
+    Safe to call on every app startup.
+    """
+    from sqlalchemy import text
+
+    table = "ot_register"
+    with engine.begin() as conn:
+        if engine.url.drivername == "sqlite":
+            rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            col_names = {row[1] for row in rows}
+            if "patient_phone" not in col_names:
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN patient_phone VARCHAR(32)")
+                )
+            if "patient_emr_id" not in col_names:
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN patient_emr_id VARCHAR(50)")
+                )
+            return
+
+        def _has_col(column_name: str) -> bool:
+            n = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = :t AND column_name = :c
+                    """
+                ),
+                {"t": table, "c": column_name},
+            ).scalar()
+            return int(n or 0) > 0
+
+        if not _has_col("patient_phone"):
+            conn.execute(
+                text(f"ALTER TABLE public.{table} ADD COLUMN patient_phone VARCHAR(32)")
+            )
+        if not _has_col("patient_emr_id"):
+            conn.execute(
+                text(f"ALTER TABLE public.{table} ADD COLUMN patient_emr_id VARCHAR(50)")
+            )

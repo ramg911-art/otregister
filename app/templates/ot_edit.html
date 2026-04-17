@@ -57,7 +57,7 @@
                         type="hidden"
                         name="patient_id"
                         id="patient_id"
-                        value="{{ record.patient_id if record.patient_id else '' }}"
+                        value="{{ record.patient_emr_id or '' }}"
                     >
 
                     <!-- Patient Name -->

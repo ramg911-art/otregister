@@ -53,6 +53,9 @@ class OTRegister(Base):
 
     patient_uhid = Column(String)
     patient_name = Column(String)
+    # EMR (SKP) internal patient id from search; used to refresh phone without UHID lookup
+    patient_emr_id = Column(String(50), nullable=True)
+    patient_phone = Column(String(32), nullable=True)
 
     date_of_surgery = Column(Date, nullable=False)   # ✅ ADD THIS
 

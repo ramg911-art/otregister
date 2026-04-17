@@ -2153,7 +2153,84 @@ def get_month_summary(db, month, year, label):
     return "\n".join(lines)
 
 
-    import re
+# ------------------------------------------------------------
+# TELEGRAM — MTD (month to date) summary
+# ------------------------------------------------------------
+def get_mtd_telegram_message(db):
+    """
+    Month-to-date: cataract, intravitreal, vue counts (1st of month → today).
+    Then cataract case counts by date for the rest of the calendar month (tomorrow → month end).
+    """
+    today = date.today()
+    month_start = today.replace(day=1)
+    _, last_day = monthrange(today.year, today.month)
+    month_end = date(today.year, today.month, last_day)
+
+    cataract_mtd = (
+        db.query(OTRegister)
+        .filter(
+            OTRegister.date_of_surgery >= month_start,
+            OTRegister.date_of_surgery <= today,
+            OTRegister.surgery == "Cataract",
+        )
+        .count()
+    )
+    intra_mtd = (
+        db.query(OTRegister)
+        .filter(
+            OTRegister.date_of_surgery >= month_start,
+            OTRegister.date_of_surgery <= today,
+            OTRegister.surgery == "Intravitreal Injection",
+        )
+        .count()
+    )
+    vue_mtd = (
+        db.query(OTRegister)
+        .filter(
+            OTRegister.date_of_surgery >= month_start,
+            OTRegister.date_of_surgery <= today,
+            OTRegister.is_vue == True,
+        )
+        .count()
+    )
+
+    lines = [
+        f"📊 *Month to date — {today.strftime('%B %Y')}*\n",
+        f"(_1st → today_)\n",
+        f"Cataract: *{cataract_mtd}*",
+        f"Intravitreal: *{intra_mtd}*",
+        f"Vue referrals: *{vue_mtd}*",
+        "",
+        "*Cataract — rest of month (by date)*",
+        "(_posted cases, tomorrow → month end_)",
+    ]
+
+    future_start = today + timedelta(days=1)
+    if future_start > month_end:
+        lines.append("_No remaining days in this month._")
+        return "\n".join(lines)
+
+    future_rows = (
+        db.query(OTRegister.date_of_surgery, func.count(OTRegister.id))
+        .filter(
+            OTRegister.surgery == "Cataract",
+            OTRegister.date_of_surgery >= future_start,
+            OTRegister.date_of_surgery <= month_end,
+        )
+        .group_by(OTRegister.date_of_surgery)
+        .order_by(OTRegister.date_of_surgery)
+        .all()
+    )
+
+    if not future_rows:
+        lines.append("_No cataract cases posted yet for remaining dates._")
+    else:
+        for d, c in future_rows:
+            lines.append(f"{d.strftime('%d/%m/%Y')}: *{c}*")
+
+    return "\n".join(lines)
+
+
 # ============================================================
 # TELEGRAM POLLING LOOP
 # ============================================================
@@ -2197,8 +2274,21 @@ def telegram_polling_loop():
                         "• *sortsend dd/mm/yyyy* — same sort, reply without IOL and category\n"
                         "• *cased dd/mm/yyyy* — cases for that date\n"
                         "• *case* — case counts for next 14 days\n"
-                        "• *caseMMYY* — month summary (e.g. case0226 = Feb 2026)"
+                        "• *caseMMYY* — month summary (e.g. case0226 = Feb 2026)\n"
+                        "• *mtd* — month-to-date totals + cataract by date (rest of month)"
                     )
+                    continue
+
+                # =====================================
+                # MTD — month to date stats
+                # =====================================
+                if text == "mtd":
+                    db = SessionLocal()
+                    try:
+                        reply = get_mtd_telegram_message(db)
+                    finally:
+                        db.close()
+                    send_telegram_message(reply)
                     continue
 
                 # =====================================
@@ -2304,8 +2394,7 @@ def telegram_polling_loop():
                     send_telegram_message(reply)
                     continue
 
-
-              # =====================================
+                # =====================================
                 # MONTH SUMMARY (STRICT caseMMYY)
                 # =====================================
                 if text.startswith("case") and text != "case":

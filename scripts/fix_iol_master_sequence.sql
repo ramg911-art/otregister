@@ -1,26 +1,45 @@
--- Run once on PostgreSQL if IOL inserts fail with duplicate key on id, or if:
---   SELECT pg_get_serial_sequence('iol_master', 'id');
--- returns NULL (sequence not linked after pgloader/SQLite import).
+-- Fix iol_master.id sequence when pg_get_serial_sequence returns NULL or inserts duplicate id.
+-- Run as superuser or table owner if ALTER fails.
 --
--- psql: \i scripts/fix_iol_master_sequence.sql
--- or paste into pgAdmin.
+-- psql -U otuser -d otregister -f scripts/fix_iol_master_sequence.sql
 
 BEGIN;
 
-CREATE SEQUENCE IF NOT EXISTS iol_master_id_seq;
+-- Drop old ownership links so OWNED BY can attach our sequence (safe if none exist)
+DO $bd$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT c.oid::regclass AS seq_reg
+    FROM pg_class c
+    JOIN pg_depend d ON d.objid = c.oid
+    JOIN pg_class t ON t.oid = d.refobjid
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE c.relkind = 'S'
+      AND n.nspname = 'public'
+      AND t.relname = 'iol_master'
+      AND a.attname = 'id'
+  LOOP
+    EXECUTE format('ALTER SEQUENCE %s OWNED BY NONE', r.seq_reg);
+  END LOOP;
+END
+$bd$;
 
-ALTER TABLE iol_master
-  ALTER COLUMN id SET DEFAULT nextval('iol_master_id_seq'::regclass);
+CREATE SEQUENCE IF NOT EXISTS public.iol_master_id_seq;
 
-ALTER SEQUENCE iol_master_id_seq OWNED BY iol_master.id;
+ALTER TABLE public.iol_master
+  ALTER COLUMN id SET DEFAULT nextval('public.iol_master_id_seq'::regclass);
+
+ALTER SEQUENCE public.iol_master_id_seq OWNED BY public.iol_master.id;
 
 SELECT setval(
-  'iol_master_id_seq'::regclass,
-  (SELECT COALESCE(MAX(id), 0) FROM iol_master)
+  'public.iol_master_id_seq'::regclass,
+  (SELECT COALESCE(MAX(id), 0) FROM public.iol_master)
 );
 
 COMMIT;
 
--- Verify:
--- SELECT pg_get_serial_sequence('iol_master', 'id');
--- should return: public.iol_master_id_seq
+-- Must return: public.iol_master_id_seq
+SELECT pg_get_serial_sequence('public.iol_master', 'id');
+SELECT pg_get_serial_sequence('iol_master', 'id');

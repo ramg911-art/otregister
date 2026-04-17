@@ -92,13 +92,12 @@ def fix_postgres_sequence(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_name = table_name + "_" + id_column + "_seq"
-    # setval(seq, v): next nextval() returns v+1 — use MAX(id), not MAX(id)+1
-    max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + table_name + ")"
+    fq_seq = "public." + seq_name
+    max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM public." + table_name + ")"
 
     def _do(conn):
         conn.execute(
-            text("SELECT setval(:seq::regclass, " + max_sub + ")"),
-            {"seq": seq_name},
+            text("SELECT setval('" + fq_seq + "'::regclass, " + max_sub + ")"),
         )
 
     try:
@@ -121,10 +120,12 @@ def reset_id_sequence(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_fallback = f"{table_name}_{id_column}_seq"
-    max_sub = f"(SELECT COALESCE(MAX({id_column}), 0) FROM {table_name})"
+    fq_tbl = "public." + table_name
+    fq_fb = "public." + seq_fallback
+    max_sub = f"(SELECT COALESCE(MAX({id_column}), 0) FROM {fq_tbl})"
 
     def _do(conn):
-        # Primary: sequence PostgreSQL links to this column, else conventional name
+        # Schema-qualified table name — required for pg_get_serial_sequence after our fixes
         conn.execute(
             text(
                 f"""
@@ -134,13 +135,12 @@ def reset_id_sequence(db, table_name: str, id_column: str = "id"):
                 )
                 """
             ),
-            {"tbl": table_name, "col": id_column, "fb": seq_fallback},
+            {"tbl": fq_tbl, "col": id_column, "fb": fq_fb},
         )
-        # Secondary: always bump conventional name too (may differ from linked seq after migration)
         try:
             conn.execute(
                 text(f"SELECT setval(:fb::regclass, {max_sub})"),
-                {"fb": seq_fallback},
+                {"fb": fq_fb},
             )
         except Exception:
             pass
@@ -162,8 +162,7 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     Fixes 'null value in column "id" violates not-null constraint' after pgloader migration.
     Uses a separate engine transaction so failed DDL cannot abort the ORM session.
 
-    After SQLite/pgloader imports, pg_get_serial_sequence() is often NULL until we:
-    SET DEFAULT + ALTER SEQUENCE ... OWNED BY — that links the sequence so resets apply correctly.
+    Uses schema-qualified public.* names so pg_get_serial_sequence('public.tab','id') works.
     """
     if db.get_bind().url.drivername == "sqlite":
         return
@@ -172,27 +171,57 @@ def ensure_postgres_id_default(db, table_name: str, id_column: str = "id"):
     if table_name not in allowed:
         return
     seq_name = table_name + "_" + id_column + "_seq"
-    # qualified ref for OWNED BY / regclass (public schema)
-    tbl_col = table_name + "." + id_column
+    sch = "public"
+    fq_table = sch + "." + table_name
+    fq_seq = sch + "." + seq_name
+    fq_col = fq_table + "." + id_column
 
     def _do(conn):
-        conn.execute(text("CREATE SEQUENCE IF NOT EXISTS " + seq_name))
-        conn.execute(
-            text(
-                "ALTER TABLE " + table_name + " ALTER COLUMN " + id_column
-                + " SET DEFAULT nextval('" + seq_name + "'::regclass)"
-            )
-        )
-        # Link sequence ↔ column so pg_get_serial_sequence() is non-NULL (fixes pgloader imports)
+        # Detach any old sequence still "owning" this column (pgloader leaves odd states)
         try:
-            conn.execute(text("ALTER SEQUENCE " + seq_name + " OWNED BY " + tbl_col))
+            conn.execute(
+                text(
+                    """
+                    DO $bd$
+                    DECLARE
+                      r RECORD;
+                    BEGIN
+                      FOR r IN
+                        SELECT c.oid::regclass AS seq_reg
+                        FROM pg_class c
+                        JOIN pg_depend d ON d.objid = c.oid
+                        JOIN pg_class t ON t.oid = d.refobjid
+                        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+                        JOIN pg_namespace n ON n.oid = t.relnamespace
+                        WHERE c.relkind = 'S'
+                          AND n.nspname = 'public'
+                          AND t.relname = :tname
+                          AND a.attname = :cname
+                      LOOP
+                        EXECUTE format('ALTER SEQUENCE %s OWNED BY NONE', r.seq_reg);
+                      END LOOP;
+                    END
+                    $bd$
+                    """
+                ),
+                {"tname": table_name, "cname": id_column},
+            )
         except Exception:
             pass
-        max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + table_name + ")"
+
+        conn.execute(text("CREATE SEQUENCE IF NOT EXISTS " + fq_seq))
         conn.execute(
-            text("SELECT setval(:seq::regclass, " + max_sub + ")"),
-            {"seq": seq_name},
+            text(
+                "ALTER TABLE " + fq_table + " ALTER COLUMN " + id_column
+                + " SET DEFAULT nextval('" + fq_seq + "'::regclass)"
+            )
         )
+        try:
+            conn.execute(text("ALTER SEQUENCE " + fq_seq + " OWNED BY " + fq_col))
+        except Exception:
+            pass
+        max_sub = "(SELECT COALESCE(MAX(" + id_column + "), 0) FROM " + fq_table + ")"
+        conn.execute(text("SELECT setval('" + fq_seq + "'::regclass, " + max_sub + ")"))
 
     try:
         _pg_engine_run(db, _do)

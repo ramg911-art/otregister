@@ -1,6 +1,8 @@
 import os
+import re
 import json
 import requests
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from datetime import date, datetime
 
@@ -206,23 +208,194 @@ def _extract_patient_details_from_soup(soup: BeautifulSoup) -> dict:
     }
 
 
+def _unwrap_patient_info_payload(data) -> dict:
+    """EMR getPatientInfo may return the patient object at top level or under data/patient."""
+    if not isinstance(data, dict):
+        return {}
+    if data.get("success") is False and not any(
+        k in data for k in ("patient_name", "uhid", "phone", "data", "patient")
+    ):
+        return {}
+    for key in ("patient", "data", "result", "info"):
+        inner = data.get(key)
+        if isinstance(inner, dict):
+            return inner
+        if isinstance(inner, list) and inner and isinstance(inner[0], dict):
+            return inner[0]
+    return data
+
+
+def _extract_phone_from_dict(d: dict) -> str:
+    if not isinstance(d, dict):
+        return ""
+    for key in (
+        "phone",
+        "mobile",
+        "mobile_no",
+        "mobile_number",
+        "contact_no",
+        "patient_mobile",
+    ):
+        v = d.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _extract_gender_from_dict(d: dict) -> str:
+    if not isinstance(d, dict):
+        return ""
+    for key in ("genderdesc", "gender_name", "gender", "sex"):
+        v = d.get(key)
+        if v is not None and str(v).strip():
+            return _normalize_gender(str(v).strip())
+    return ""
+
+
+def _try_parse_doctor_id_from_emr_html(html: str) -> str:
+    if not html:
+        return ""
+    m = re.search(r"doctor_id=(\d+)", html)
+    if m:
+        return m.group(1)
+    m = re.search(r"['\"]doctor_id['\"]\s*:\s*['\"]?(\d+)", html)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def fetch_patient_info_emr_lite(
+    session: requests.Session, base: str, patient_id: str
+) -> dict:
+    """
+    Same XHR as browser: POST emr_lite/getPatientInfo (application/json response).
+    """
+    if not patient_id:
+        return {}
+
+    url = f"{base}/emr_lite/getPatientInfo"
+    parsed = urlparse(base)
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else base
+    headers_base = {
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin": origin,
+    }
+
+    doctor_id = ""
+    csrf_token = ""
+    try:
+        lite = session.get(f"{base}/emr_lite", timeout=10)
+        if lite.status_code == 200 and lite.text:
+            doctor_id = _try_parse_doctor_id_from_emr_html(lite.text)
+            lsoup = BeautifulSoup(lite.text, "html.parser")
+            tok = lsoup.find("input", {"name": "_token"})
+            if tok and tok.get("value"):
+                csrf_token = str(tok["value"]).strip()
+    except Exception:
+        pass
+
+    referer_templates = [f"{base}/emr_lite/view-patient?user_id={patient_id}"]
+    if doctor_id:
+        referer_templates.insert(
+            0,
+            f"{base}/emr_lite/view-patient?user_id={patient_id}&doctor_id={doctor_id}",
+        )
+    referer_templates.append(f"{base}/emr_lite")
+
+    payload_candidates = []
+    if doctor_id:
+        payload_candidates.append(
+            {"user_id": str(patient_id), "doctor_id": str(doctor_id)}
+        )
+    payload_candidates.extend(
+        [
+            {"user_id": str(patient_id)},
+            {"patient_id": str(patient_id)},
+            {"id": str(patient_id)},
+        ]
+    )
+
+    if csrf_token:
+        expanded = []
+        for p in payload_candidates:
+            expanded.append(p)
+            q = dict(p)
+            q["_token"] = csrf_token
+            expanded.append(q)
+        payload_candidates = expanded
+
+    for referer in referer_templates:
+        hdrs = {**headers_base, "Referer": referer}
+        for payload in payload_candidates:
+            try:
+                r = session.post(url, data=payload, headers=hdrs, timeout=12)
+            except Exception:
+                continue
+            if r.status_code != 200:
+                continue
+            data = _safe_json(r)
+            if not isinstance(data, dict):
+                continue
+            inner = _unwrap_patient_info_payload(data)
+            if not inner:
+                continue
+            phone = _extract_phone_from_dict(inner)
+            gender = _extract_gender_from_dict(inner)
+            name = (
+                inner.get("patient_name")
+                or inner.get("name")
+                or ""
+            )
+            if isinstance(name, str):
+                name = name.strip()
+            uhid = inner.get("uhid") or inner.get("patient_uhid") or ""
+            if isinstance(uhid, str):
+                uhid = uhid.strip()
+            if phone or gender or name or uhid:
+                return {
+                    "patient_name": name,
+                    "uhid": uhid,
+                    "phone": phone,
+                    "gender": gender,
+                }
+
+    return {}
+
+
 def fetch_patient_details(session: requests.Session, patient_id: str) -> dict:
     if not patient_id:
         return {}
 
-    url = f"{BASE_URLS['SKP']}/admin/patient/{patient_id}"
-    try:
-        r = session.get(url, timeout=10)
-    except Exception:
-        return {}
+    base = BASE_URLS["SKP"]
+    info = fetch_patient_info_emr_lite(session, base, patient_id)
 
-    if r.status_code != 200 or not r.text:
-        return {}
+    soup_details: dict = {}
+    if not info or (not info.get("phone") and not info.get("gender")):
+        url = f"{BASE_URLS['SKP']}/admin/patient/{patient_id}"
+        try:
+            r = session.get(url, timeout=10)
+        except Exception:
+            r = None
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    details = _extract_patient_details_from_soup(soup)
-    details["patient_id"] = patient_id
-    return details
+        if r and r.status_code == 200 and r.text:
+            soup = BeautifulSoup(r.text, "html.parser")
+            soup_details = _extract_patient_details_from_soup(soup)
+
+    patient_name = (info.get("patient_name") or soup_details.get("patient_name") or "").strip()
+    phone = info.get("phone") or soup_details.get("phone", "")
+    gender = info.get("gender") or soup_details.get("gender", "")
+    uhid = (info.get("uhid") or "").strip()
+
+    return {
+        "patient_id": patient_id,
+        "patient_name": patient_name,
+        "uhid": uhid,
+        "phone": phone,
+        "gender": gender,
+        "age": soup_details.get("age", ""),
+    }
 
 
 def _safe_json(response: requests.Response):
@@ -231,153 +404,6 @@ def _safe_json(response: requests.Response):
     except Exception:
         return None
 
-
-def _extract_patient_list(data) -> list:
-    if isinstance(data, list):
-        return data
-    if not isinstance(data, dict):
-        return []
-    for key in ("patients", "data", "patient_list", "result", "results", "records"):
-        value = data.get(key)
-        if isinstance(value, list):
-            return value
-    return []
-
-
-def _extract_bearer_token(data: dict) -> str:
-    if not isinstance(data, dict):
-        return ""
-    for key in ("token", "access_token", "auth_token"):
-        value = data.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    nested = data.get("data")
-    if isinstance(nested, dict):
-        for key in ("token", "access_token", "auth_token"):
-            value = nested.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return ""
-
-
-def _emr_api_login(session: requests.Session, base: str, email: str, password: str) -> str:
-    url = f"{base}/mobile_emr_apis/login"
-    payloads = [
-        {"email": email, "password": password},
-        {"username": email, "password": password},
-        {"user_name": email, "password": password},
-    ]
-
-    for payload in payloads:
-        try:
-            response = session.post(url, data=payload, timeout=10)
-        except Exception:
-            continue
-        if response.status_code != 200:
-            continue
-        token = _extract_bearer_token(_safe_json(response) or {})
-        if token:
-            return token
-    return ""
-
-
-def _map_api_patient_item(item: dict) -> dict:
-    if not isinstance(item, dict):
-        return {}
-
-    patient_name = (
-        item.get("patient_name")
-        or item.get("name")
-        or ""
-    )
-    uhid = item.get("uhid") or item.get("patient_uhid") or ""
-    phone = (
-        item.get("phone")
-        or item.get("mobile")
-        or item.get("mobile_no")
-        or item.get("mobile_number")
-        or ""
-    )
-    gender = (
-        item.get("genderdesc")
-        or item.get("gender_name")
-        or item.get("gender")
-        or ""
-    )
-    patient_id = item.get("patient_id") or item.get("id")
-
-    label_name = str(patient_name).strip()
-    label_uhid = str(uhid).strip()
-    label = f"{label_name} [{label_uhid}]".strip()
-
-    return {
-        "label": label,
-        "name": label_name,
-        "uhid": label_uhid,
-        "patient_id": str(patient_id) if patient_id is not None else None,
-        "phone": str(phone).strip(),
-        "gender": _normalize_gender(str(gender)),
-    }
-
-
-def search_patient_by_mobile_emr_api(query: str) -> list:
-    query = (query or "").strip()
-    if len(query) < 2:
-        return []
-
-    creds = load_config()
-    base = BASE_URLS["SKP"]
-    session = requests.Session()
-    token = _emr_api_login(session, base, creds.get("email", ""), creds.get("password", ""))
-    if not token:
-        return []
-
-    url = f"{base}/mobile_emr_apis/fetchPatientList"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-    payload_candidates = [
-        {"search": query},
-        {"query": query},
-        {"keyword": query},
-        {"op_no_search": query},
-        {"uhid": query},
-    ]
-
-    for payload in payload_candidates:
-        try:
-            response = session.post(url, data=payload, headers=headers, timeout=12)
-        except Exception:
-            continue
-        if response.status_code != 200:
-            continue
-
-        data = _safe_json(response)
-        patients = _extract_patient_list(data)
-        mapped = [_map_api_patient_item(item) for item in patients]
-        mapped = [row for row in mapped if row and (row.get("name") or row.get("uhid"))]
-        if mapped:
-            return mapped
-
-    return []
-
-# app/skp.py
-def search_global_patient(query: str):
-    query = query.strip()
-    if len(query) < 2:
-        return []
-
-    # Numeric search (UHID / OP no)
-    if query.isdigit():
-        return search_patient_by_number(query)
-
-    # (Optional) Name search can be added later
-    return []
-# app/skp.py
-
-from bs4 import BeautifulSoup
 
 def search_patient_by_number(query: str):
     if not query.isdigit():
@@ -440,6 +466,8 @@ def search_patient_by_number(query: str):
         if details:
             if details.get("patient_name"):
                 result["name"] = details["patient_name"]
+            if details.get("uhid"):
+                result["uhid"] = details["uhid"]
             result["age"] = details.get("age", "")
             result["gender"] = details.get("gender", "")
             result["phone"] = details.get("phone", "")
@@ -457,14 +485,7 @@ def search_global_patient(query: str):
     if len(query) < 2:
         return []
 
-    # Prefer EMR API search (returns phone/gender when available).
-    api_results = search_patient_by_mobile_emr_api(query)
-    if api_results:
-        return api_results
-
-    # Fallback to existing numeric search (UHID / OP No).
     if query.isdigit():
         return search_patient_by_number(query)
 
-    # Name search can be added later
     return []

@@ -335,3 +335,46 @@ def ensure_patient_feedback_medicine_column(engine):
                 )
         except Exception:
             pass
+
+
+def ensure_patient_feedback_updated_by_column(engine):
+    """Add updated_by_user_id to patient_feedback if missing."""
+    from sqlalchemy import text
+
+    table = "patient_feedback"
+    with engine.begin() as conn:
+        if engine.url.drivername == "sqlite":
+            try:
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            except Exception:
+                return
+            if not rows:
+                return
+            col_names = {row[1] for row in rows}
+            if "updated_by_user_id" not in col_names:
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN updated_by_user_id INTEGER")
+                )
+            return
+
+        def _has_col(column_name: str) -> bool:
+            n = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = :t AND column_name = :c
+                    """
+                ),
+                {"t": table, "c": column_name},
+            ).scalar()
+            return int(n or 0) > 0
+
+        try:
+            if not _has_col("updated_by_user_id"):
+                conn.execute(
+                    text(
+                        f"ALTER TABLE public.{table} ADD COLUMN updated_by_user_id INTEGER"
+                    )
+                )
+        except Exception:
+            pass

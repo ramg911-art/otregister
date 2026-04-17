@@ -13,6 +13,12 @@
 {% block content %}
 
 <div class="card shadow-sm">
+    {% if feedback_error == 'locked' %}
+    <div class="alert alert-info alert-dismissible fade show rounded-0 mb-0 border-0 border-bottom" role="alert">
+        This feedback was already saved and cannot be edited.
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
     <div class="card-header bg-white d-flex justify-content-between align-items-end flex-wrap gap-2">
         <b>Patient Feedback</b>
 
@@ -50,6 +56,7 @@
                 <tbody>
                 {% for r in records %}
                 {% set fb = feedback_map.get(r.id) %}
+                {% set locked = fb is not none %}
                 <tr>
                     <td>{{ loop.index }}</td>
                     <td>{{ r.patient_uhid }}</td>
@@ -64,6 +71,7 @@
                             form="feedback-form-{{ r.id }}"
                             id="call-{{ r.id }}"
                             {% if fb and fb.feedback_call_done %}checked{% endif %}
+                            {% if locked %}disabled{% endif %}
                         >
                     </td>
                     <td>
@@ -77,6 +85,7 @@
                                     id="med-c-{{ r.id }}"
                                     form="feedback-form-{{ r.id }}"
                                     {% if fb and fb.medicine_administration == 'correct' %}checked{% endif %}
+                                    {% if locked %}disabled{% endif %}
                                 >
                                 <label class="form-check-label" for="med-c-{{ r.id }}">Correct</label>
                             </div>
@@ -89,6 +98,7 @@
                                     id="med-i-{{ r.id }}"
                                     form="feedback-form-{{ r.id }}"
                                     {% if fb and fb.medicine_administration == 'incorrect' %}checked{% endif %}
+                                    {% if locked %}disabled{% endif %}
                                 >
                                 <label class="form-check-label" for="med-i-{{ r.id }}">Incorrect</label>
                             </div>
@@ -100,6 +110,7 @@
                             form="feedback-form-{{ r.id }}"
                             class="form-select form-select-sm star-rating-select"
                             aria-label="Rating 1 to 5 stars"
+                            {% if locked %}disabled{% endif %}
                         >
                             <option value="">Not rated</option>
                             {% for s in [1,2,3,4,5] %}
@@ -116,19 +127,29 @@
                             rows="2"
                             form="feedback-form-{{ r.id }}"
                             placeholder="Notes"
+                            {% if locked %}disabled{% endif %}
                         >{% if fb and fb.comments %}{{ fb.comments }}{% endif %}</textarea>
                     </td>
-                    <td class="small text-muted text-nowrap">
+                    <td class="small text-muted" style="max-width: 9rem;">
                         {% if fb and fb.updated_at %}
-                            {{ fb.updated_at.strftime('%d/%m/%Y %H:%M') }}
+                            <span class="text-nowrap d-inline-block">{{ fb.updated_at.strftime('%d/%m/%Y %H:%M') }}</span>
+                            {% if fb.updated_by %}
+                                <br><span class="text-body-secondary">{{ fb.updated_by.username }}</span>
+                            {% endif %}
                         {% else %}
                             —
                         {% endif %}
                     </td>
                     <td class="text-nowrap">
+                        {% if locked %}
+                        <button type="button" class="btn btn-sm btn-secondary" disabled aria-disabled="true">
+                            Saved
+                        </button>
+                        {% else %}
                         <button type="submit" class="btn btn-sm btn-primary" form="feedback-form-{{ r.id }}">
                             Save
                         </button>
+                        {% endif %}
                     </td>
                 </tr>
                 {% else %}

@@ -17,6 +17,7 @@ from app.database import (
     SessionLocal,
     ensure_ot_register_patient_contact_columns,
     ensure_patient_feedback_medicine_column,
+    ensure_patient_feedback_updated_by_column,
     migrate_legacy_user_roles,
 )
 from app.models import Base, OTRegister, IOLMaster, User
@@ -85,6 +86,7 @@ except Exception:
     pass
 ensure_ot_register_patient_contact_columns(engine)
 ensure_patient_feedback_medicine_column(engine)
+ensure_patient_feedback_updated_by_column(engine)
 
 # Fix PostgreSQL id defaults and sequences at startup (after SQLite→PG migration)
 # Fixes "null value in column id violates not-null" and duplicate key on id
@@ -218,6 +220,7 @@ def patient_feedback_page(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_module("patient_feedback")),
 ):
+    feedback_error = request.query_params.get("error")
     if selected_date:
         day = datetime.strptime(selected_date, "%Y-%m-%d").date()
     else:
@@ -237,6 +240,7 @@ def patient_feedback_page(
     if ot_ids:
         rows = (
             db.query(PatientFeedback)
+            .options(joinedload(PatientFeedback.updated_by))
             .filter(PatientFeedback.ot_register_id.in_(ot_ids))
             .all()
         )
@@ -251,6 +255,7 @@ def patient_feedback_page(
             "feedback_map": feedback_map,
             "selected_date": selected_date,
             "current_user": current_user,
+            "feedback_error": feedback_error,
         },
     )
 
@@ -282,6 +287,17 @@ async def patient_feedback_save(
     if not ot:
         raise HTTPException(status_code=404, detail="OT record not found")
 
+    existing_fb = (
+        db.query(PatientFeedback)
+        .filter(PatientFeedback.ot_register_id == ot_id_int)
+        .first()
+    )
+    if existing_fb is not None:
+        return RedirectResponse(
+            f"/patient-feedback?selected_date={quote(selected_date)}&error=locked",
+            status_code=303,
+        )
+
     call_done = bool(form.get("call_done"))
     rating_raw = form.get("rating")
     comments = (form.get("comments") or "").strip()[:2000]
@@ -302,23 +318,15 @@ async def patient_feedback_save(
 
     now = datetime.utcnow()
 
-    fb = (
-        db.query(PatientFeedback)
-        .filter(PatientFeedback.ot_register_id == ot_id_int)
-        .first()
-    )
-    if not fb:
-        fb = PatientFeedback(ot_register_id=ot_id_int, created_at=now)
-        db.add(fb)
-
+    fb = PatientFeedback(ot_register_id=ot_id_int, created_at=now)
+    db.add(fb)
     fb.feedback_call_done = call_done
     fb.call_marked_by_user_id = user_id if call_done else None
     fb.medicine_administration = medicine_administration
     fb.rating = rating
     fb.comments = comments if comments else None
     fb.updated_at = now
-    if fb.created_at is None:
-        fb.created_at = now
+    fb.updated_by_user_id = user_id
 
     db.commit()
 

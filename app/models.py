@@ -118,9 +118,11 @@ class PatientFeedback(Base):
 
     created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     ot_register = relationship("OTRegister", back_populates="patient_feedback")
     call_marked_by = relationship("User", foreign_keys=[call_marked_by_user_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_user_id])
 
 
 class IntravitrealDrugMaster(Base):

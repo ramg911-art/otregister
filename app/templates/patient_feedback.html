@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Feedback{% endblock %}
+
+{% block head %}
+<style>
+    .star-rating-select {
+        min-width: 7.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-end flex-wrap gap-2">
+        <b>Patient Feedback</b>
+
+        <form method="get" class="d-flex gap-2 align-items-end">
+            <div>
+                <label class="form-label mb-0">Surgery date</label>
+                <input
+                    type="date"
+                    name="selected_date"
+                    class="form-control"
+                    value="{{ selected_date }}"
+                >
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">View</button>
+        </form>
+    </div>
+
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>#</th>
+                        <th>UHID</th>
+                        <th>Patient name</th>
+                        <th>Phone</th>
+                        <th>Call done</th>
+                        <th>Marked by</th>
+                        <th>Rating</th>
+                        <th>Comments</th>
+                        <th>Recorded</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in records %}
+                {% set fb = feedback_map.get(r.id) %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.patient_uhid }}</td>
+                    <td>{{ r.patient_name }}</td>
+                    <td>{{ r.patient_phone or '—' }}</td>
+                    <td>
+                        <input
+                            type="checkbox"
+                            class="form-check-input"
+                            name="call_done"
+                            value="1"
+                            form="feedback-form-{{ r.id }}"
+                            id="call-{{ r.id }}"
+                            {% if fb and fb.feedback_call_done %}checked{% endif %}
+                        >
+                    </td>
+                    <td class="small text-muted">
+                        {% if fb and fb.feedback_call_done and fb.call_marked_by %}
+                            {{ fb.call_marked_by.username }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        <select
+                            name="rating"
+                            form="feedback-form-{{ r.id }}"
+                            class="form-select form-select-sm star-rating-select"
+                            aria-label="Rating 1 to 5 stars"
+                        >
+                            <option value="">Not rated</option>
+                            {% for s in [1,2,3,4,5] %}
+                            <option value="{{ s }}" {% if fb and fb.rating == s %}selected{% endif %}>
+                                {% for _ in range(s) %}★{% endfor %} ({{ s }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td style="min-width: 12rem;">
+                        <textarea
+                            class="form-control form-control-sm"
+                            name="comments"
+                            rows="2"
+                            form="feedback-form-{{ r.id }}"
+                            placeholder="Notes"
+                        >{% if fb and fb.comments %}{{ fb.comments }}{% endif %}</textarea>
+                    </td>
+                    <td class="small text-muted text-nowrap">
+                        {% if fb and fb.updated_at %}
+                            {{ fb.updated_at.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td class="text-nowrap">
+                        <button type="submit" class="btn btn-sm btn-primary" form="feedback-form-{{ r.id }}">
+                            Save
+                        </button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10" class="text-center text-muted py-4">
+                        No OT entries for this date.
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% for r in records %}
+<form
+    id="feedback-form-{{ r.id }}"
+    method="post"
+    action="/patient-feedback/save"
+    class="d-none"
+    aria-hidden="true"
+>
+    <input type="hidden" name="ot_id" value="{{ r.id }}">
+    <input type="hidden" name="selected_date" value="{{ selected_date }}">
+</form>
+{% endfor %}
+
+{% endblock %}

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -75,6 +75,41 @@ class OTRegister(Base):
     intravitreal_drug = relationship("IntravitrealDrugMaster")
 
     is_vue = Column(Boolean, default=False)
+
+    patient_feedback = relationship(
+        "PatientFeedback",
+        back_populates="ot_register",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class PatientFeedback(Base):
+    """Post-discharge feedback for an OT register row (one row per case)."""
+
+    __tablename__ = "patient_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ot_register_id = Column(
+        Integer,
+        ForeignKey("ot_register.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+
+    feedback_call_done = Column(Boolean, default=False)
+    call_marked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    rating = Column(Integer, nullable=True)  # 1–5
+    comments = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    ot_register = relationship("OTRegister", back_populates="patient_feedback")
+    call_marked_by = relationship("User", foreign_keys=[call_marked_by_user_id])
+
+
 class IntravitrealDrugMaster(Base):
     __tablename__ = "intravitreal_drug_master"
 

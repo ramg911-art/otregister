@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import date
 
 from starlette.middleware.sessions import SessionMiddleware
@@ -37,7 +37,13 @@ from collections import defaultdict
 from datetime import date, datetime
 from collections import defaultdict
 from fastapi import APIRouter
-from app.models import Base, OTRegister, IOLMaster, IntravitrealDrugMaster
+from app.models import (
+    Base,
+    OTRegister,
+    IOLMaster,
+    IntravitrealDrugMaster,
+    PatientFeedback,
+)
 from sqlalchemy.exc import IntegrityError
 
 # --------------------------------------------------
@@ -96,7 +102,7 @@ def get_current_user(db: Session, user_id: int):
 # --------------------------------------------------
 from datetime import date, datetime
 from fastapi import Request, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import OTRegister, User
 from app.database import get_db
@@ -163,6 +169,116 @@ def api_dashboard_phones(
     )
     mapping = phones_for_ot_dashboard_records(records)
     return {"phones": {str(k): v for k, v in mapping.items()}}
+
+
+@app.get("/patient-feedback")
+def patient_feedback_page(
+    request: Request,
+    selected_date: str | None = None,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(require_login),
+):
+    current_user = db.query(User).filter(User.id == user_id).first()
+
+    if selected_date:
+        day = datetime.strptime(selected_date, "%Y-%m-%d").date()
+    else:
+        day = date.today()
+        selected_date = day.strftime("%Y-%m-%d")
+
+    records = (
+        db.query(OTRegister)
+        .filter(OTRegister.date_of_surgery == day)
+        .order_by(OTRegister.id.asc())
+        .all()
+    )
+    ot_ids = [r.id for r in records]
+    feedback_map = {}
+    if ot_ids:
+        rows = (
+            db.query(PatientFeedback)
+            .options(joinedload(PatientFeedback.call_marked_by))
+            .filter(PatientFeedback.ot_register_id.in_(ot_ids))
+            .all()
+        )
+        feedback_map = {f.ot_register_id: f for f in rows}
+
+    return templates.TemplateResponse(
+        "patient_feedback.html",
+        {
+            "request": request,
+            "records": records,
+            "feedback_map": feedback_map,
+            "selected_date": selected_date,
+            "current_user": current_user,
+        },
+    )
+
+
+@app.post("/patient-feedback/save")
+async def patient_feedback_save(
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(require_login),
+):
+    form = await request.form()
+    selected_date = (form.get("selected_date") or "").strip()
+    ot_raw = form.get("ot_id")
+    if not ot_raw:
+        return RedirectResponse(
+            "/patient-feedback" + (f"?selected_date={quote(selected_date)}" if selected_date else ""),
+            status_code=303,
+        )
+    try:
+        ot_id_int = int(ot_raw)
+    except ValueError:
+        return RedirectResponse(
+            f"/patient-feedback?selected_date={quote(selected_date)}",
+            status_code=303,
+        )
+
+    ot = db.query(OTRegister).filter(OTRegister.id == ot_id_int).first()
+    if not ot:
+        raise HTTPException(status_code=404, detail="OT record not found")
+
+    call_done = bool(form.get("call_done"))
+    rating_raw = form.get("rating")
+    comments = (form.get("comments") or "").strip()[:2000]
+
+    rating = None
+    if rating_raw not in (None, ""):
+        try:
+            rv = int(rating_raw)
+            if 1 <= rv <= 5:
+                rating = rv
+        except ValueError:
+            pass
+
+    now = datetime.utcnow()
+
+    fb = (
+        db.query(PatientFeedback)
+        .filter(PatientFeedback.ot_register_id == ot_id_int)
+        .first()
+    )
+    if not fb:
+        fb = PatientFeedback(ot_register_id=ot_id_int, created_at=now)
+        db.add(fb)
+
+    fb.feedback_call_done = call_done
+    fb.call_marked_by_user_id = user_id if call_done else None
+    fb.rating = rating
+    fb.comments = comments if comments else None
+    fb.updated_at = now
+    if fb.created_at is None:
+        fb.created_at = now
+
+    db.commit()
+
+    return RedirectResponse(
+        f"/patient-feedback?selected_date={quote(selected_date)}",
+        status_code=303,
+    )
 
 
 @app.post("/ot/{ot_id}/update")
@@ -302,7 +418,7 @@ def patient_search_test_html(
 
 from fastapi import Request, Depends
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import OTRegister
@@ -1053,12 +1169,12 @@ def admin_dashboard_api(
 from collections import defaultdict
 from datetime import datetime
 from fastapi import Request, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from collections import defaultdict
 from datetime import datetime
 from fastapi import Depends, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import threading
 import time
 import requests
@@ -1068,7 +1184,6 @@ from datetime import datetime, date, timedelta
 from calendar import monthrange
 from collections import defaultdict
 from sqlalchemy import func
-from sqlalchemy.orm import joinedload
 
 from app.database import SessionLocal
 from app.models import OTRegister
@@ -1212,7 +1327,7 @@ from reportlab.lib import colors
 
 from fastapi import Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 import io
 
@@ -1340,7 +1455,7 @@ def surgery_report_pdf(
 from collections import defaultdict
 from datetime import datetime
 from fastapi import Depends, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 @app.get("/reports/vue")
 def vue_report(
@@ -1403,7 +1518,7 @@ def vue_report(
 from collections import defaultdict
 from datetime import datetime
 from fastapi import Request, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from collections import defaultdict
 from datetime import datetime
@@ -1475,7 +1590,7 @@ from datetime import datetime
 from datetime import datetime
 from collections import defaultdict
 from fastapi import Request, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import OTRegister
 from app.auth import require_login

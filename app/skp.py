@@ -129,7 +129,12 @@ def fetch_patient(patient_id: str):
 
 def _extract_input_value(soup: BeautifulSoup, field_names: list[str]) -> str:
     for field in field_names:
-        tag = soup.find("input", {"name": field}) or soup.find("select", {"name": field})
+        tag = (
+            soup.find("input", {"name": field})
+            or soup.find("select", {"name": field})
+            or soup.find("input", {"id": field})
+            or soup.find("select", {"id": field})
+        )
         if not tag:
             continue
         if tag.name == "select":
@@ -156,14 +161,27 @@ def _compute_age_from_dob(dob_value: str) -> str:
     return ""
 
 
+def _extract_age_from_agegender(agegender_value: str) -> str:
+    if not agegender_value:
+        return ""
+    digits = "".join(ch for ch in agegender_value if ch.isdigit())
+    return digits
+
+
 def _extract_patient_details_from_soup(soup: BeautifulSoup) -> dict:
     patient_name = _extract_input_value(soup, ["patient_name", "name"])
-    gender = _extract_input_value(soup, ["gender", "sex", "patient_gender"])
+    gender = _extract_input_value(
+        soup,
+        ["genderdesc", "gender_name", "gender.name", "gender", "sex", "patient_gender"],
+    )
     phone = _extract_input_value(
         soup,
         ["phone", "mobile", "mobile_no", "mobile_number", "contact_no", "patient_mobile"],
     )
     age = _extract_input_value(soup, ["age", "patient_age"])
+    if not age:
+        agegender = _extract_input_value(soup, ["agegender", "age_gender"])
+        age = _extract_age_from_agegender(agegender)
     if not age:
         dob = _extract_input_value(soup, ["dob", "date_of_birth", "birth_date"])
         age = _compute_age_from_dob(dob)

@@ -11,7 +11,7 @@ from app.database import engine, get_db, fix_postgres_sequence, ensure_postgres_
 from app.models import Base, OTRegister, IOLMaster
 from app.auth import router as auth_router, require_login
 from app.constants import SURGERY_TYPES, PATIENT_CATEGORIES
-from app.skp import fetch_patient
+from app.skp import fetch_patient, phones_for_ot_dashboard_records
 from app.database import engine
 from app.models import Base  # 🔑 THIS IMPORT IS CRITICAL
 from datetime import datetime
@@ -116,11 +116,14 @@ def dashboard(
         .all()
     )
 
+    record_phones = phones_for_ot_dashboard_records(records)
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "records": records,
+            "record_phones": record_phones,
             "selected_date": selected_date,
             "current_user": current_user,
             "save_error": error,

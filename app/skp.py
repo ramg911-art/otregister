@@ -498,6 +498,143 @@ def _safe_json(response: requests.Response):
         return None
 
 
+def _uhid_tokens_for_search(uhid: str) -> list[str]:
+    """Digit runs from UHID, longest first (for ajax op_no_search)."""
+    runs = re.findall(r"\d+", uhid or "")
+    out: list[str] = []
+    seen: set[str] = set()
+    for run in sorted(runs, key=len, reverse=True):
+        if len(run) < 2:
+            continue
+        if run not in seen:
+            seen.add(run)
+            out.append(run)
+    return out
+
+
+def _uhid_strings_match(found: str, wanted: str) -> bool:
+    a = re.sub(r"\s+", "", (found or "").upper())
+    b = re.sub(r"\s+", "", (wanted or "").upper())
+    if not a or not b:
+        return False
+    return a == b
+
+
+def ajax_search_patients_raw(
+    session: requests.Session, base: str, query: str
+) -> list[dict]:
+    """Parse emr_lite/ajaxSearchData HTML — no enrichment (same as post-case search list)."""
+    if not query.isdigit():
+        return []
+
+    r = session.get(
+        f"{base}/emr_lite/ajaxSearchData",
+        params={
+            "op_no_search": query,
+            "op_no_search_prog": 1,
+        },
+        headers={
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{base}/emr_lite",
+            "Accept": "text/html",
+        },
+        timeout=10,
+    )
+
+    if r.status_code != 200 or not r.text:
+        return []
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    results = []
+    for li in soup.find_all("li"):
+        text = li.get_text(strip=True)
+        if "[" not in text or "]" not in text:
+            continue
+
+        name, uhid = text.rsplit("[", 1)
+        uhid = uhid.replace("]", "").strip()
+
+        onclick = li.get("onclick", "")
+        patient_id = None
+        if "fillGlobalPatientData" in onclick:
+            try:
+                patient_id = onclick.split("(")[1].split(",")[0].replace('"', "")
+            except Exception:
+                pass
+
+        results.append(
+            {
+                "label": text,
+                "name": name.strip(),
+                "uhid": uhid,
+                "patient_id": patient_id,
+            }
+        )
+
+    return results
+
+
+def find_patient_id_for_uhid(
+    session: requests.Session, base: str, patient_uhid: str
+) -> str | None:
+    """Resolve internal EMR patient id by matching UHID in ajax search results."""
+    wanted = (patient_uhid or "").strip()
+    if not wanted:
+        return None
+
+    for q in _uhid_tokens_for_search(wanted):
+        for row in ajax_search_patients_raw(session, base, q):
+            if _uhid_strings_match(row.get("uhid", ""), wanted):
+                pid = row.get("patient_id")
+                if pid:
+                    return str(pid)
+    return None
+
+
+def phones_for_ot_dashboard_records(records) -> dict[int, str]:
+    """
+    For OT list rows: resolve UHID → patient_id via ajax search, then phone via
+    fetch_patient_details (getPatientInfo HTML + admin fallback) — same stack as test search.
+    """
+    out: dict[int, str] = {}
+    cache: dict[str, str] = {}
+    if not records:
+        return out
+
+    try:
+        session = ensure_logged_in("SKP")
+        base = BASE_URLS["SKP"]
+        session.get(f"{base}/emr_lite")
+    except Exception:
+        for r in records:
+            out[r.id] = ""
+        return out
+
+    for r in records:
+        u = (r.patient_uhid or "").strip()
+        if not u:
+            out[r.id] = ""
+            continue
+        if u in cache:
+            out[r.id] = cache[u]
+            continue
+        try:
+            pid = find_patient_id_for_uhid(session, base, u)
+            if not pid:
+                cache[u] = ""
+                out[r.id] = ""
+                continue
+            det = fetch_patient_details(session, pid)
+            phone = (det.get("phone") or "").strip()
+            cache[u] = phone
+            out[r.id] = phone
+        except Exception:
+            cache[u] = ""
+            out[r.id] = ""
+
+    return out
+
+
 def search_patient_by_number(query: str):
     if not query.isdigit():
         return []
@@ -508,53 +645,11 @@ def search_patient_by_number(query: str):
     # Prime EMR Lite session (required)
     session.get(f"{base}/emr_lite")
 
-    # Call the SAME endpoint SKP uses
-    r = session.get(
-        f"{base}/emr_lite/ajaxSearchData",
-        params={
-            "op_no_search": query,
-            "op_no_search_prog": 1
-        },
-        headers={
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{base}/emr_lite",
-            "Accept": "text/html"
-        },
-        timeout=10
-    )
-
-    if r.status_code != 200 or not r.text:
-        return []
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
+    raw = ajax_search_patients_raw(session, base, query)
     results = []
-    for li in soup.find_all("li"):
-        text = li.get_text(strip=True)
-
-        # Example: SUBHA [SKP/2526/000056]
-        if "[" not in text or "]" not in text:
-            continue
-
-        name, uhid = text.rsplit("[", 1)
-        uhid = uhid.replace("]", "").strip()
-
-        # Extract internal patient id from onclick
-        onclick = li.get("onclick", "")
-        patient_id = None
-        if "fillGlobalPatientData" in onclick:
-            try:
-                patient_id = onclick.split("(")[1].split(",")[0].replace('"', '')
-            except Exception:
-                pass
-
-        result = {
-            "label": text,
-            "name": name.strip(),
-            "uhid": uhid,
-            "patient_id": patient_id
-        }
-        # Enrich with details available in patient profile page.
+    for item in raw:
+        result = dict(item)
+        patient_id = result.get("patient_id")
         details = fetch_patient_details(session, patient_id) if patient_id else {}
         if details:
             if details.get("patient_name"):
@@ -568,6 +663,8 @@ def search_patient_by_number(query: str):
         results.append(result)
 
     return results
+
+
 def search_global_patient(query: str):
     """
     Unified patient search.

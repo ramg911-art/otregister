@@ -37,6 +37,7 @@
                 <th>Date</th>
                 <th>UHID</th>
                 <th>Patient</th>
+                <th>Phone</th>
                 <th>Eye</th>
                 <th>Surgery</th>
                 <th>IOL</th>
@@ -53,6 +54,7 @@
                 <td>{{ r.date_of_surgery.strftime('%d/%m/%Y') }}</td>
                 <td>{{ r.patient_uhid }}</td>
                 <td>{{ r.patient_name }}</td>
+                <td>{{ record_phones.get(r.id, '') or '—' }}</td>
                 <td>{{ r.eye }}</td>
                 <td>{{ r.surgery }}</td>
                 <td>{{ r.iol.iol_name if r.iol else '' }}</td>
@@ -60,7 +62,7 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" class="text-center text-muted">
+                <td colspan="9" class="text-center text-muted">
                     No OT entries
                 </td>
             </tr>

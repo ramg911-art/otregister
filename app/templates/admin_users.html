@@ -58,6 +58,18 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if error == 'self_delete' %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        You cannot delete the account you are logged in as. Sign in as another administrator to remove this user.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if error == 'delete_failed' %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        Could not delete this user (database constraint). If the problem continues, contact support.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     {% if role_updated %}
     <div class="alert alert-success alert-dismissible fade show" role="alert">
         User role updated.

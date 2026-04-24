@@ -923,10 +923,43 @@ def delete_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_module("admin_users")),
 ):
+    if admin.id == user_id:
+        return RedirectResponse("/admin/users?error=self_delete", status_code=303)
+
     user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        db.delete(user)
+    if not user:
+        return RedirectResponse("/admin/users", status_code=303)
+
+    if is_administrator(user):
+        other_admin = False
+        for u in db.query(User).filter(User.id != user_id).all():
+            if is_administrator(u):
+                other_admin = True
+                break
+        if not other_admin:
+            return RedirectResponse("/admin/users?error=last_admin", status_code=303)
+
+    # patient_feedback references users.id; PostgreSQL blocks delete unless cleared
+    db.query(PatientFeedback).filter(
+        PatientFeedback.call_marked_by_user_id == user_id
+    ).update(
+        {PatientFeedback.call_marked_by_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(PatientFeedback).filter(
+        PatientFeedback.updated_by_user_id == user_id
+    ).update(
+        {PatientFeedback.updated_by_user_id: None},
+        synchronize_session=False,
+    )
+    db.flush()
+
+    db.delete(user)
+    try:
         db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse("/admin/users?error=delete_failed", status_code=303)
 
     return RedirectResponse("/admin/users", status_code=303)
 

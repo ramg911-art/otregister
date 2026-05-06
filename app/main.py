@@ -302,7 +302,8 @@ async def patient_feedback_save(
     rating_raw = form.get("rating")
     comments = (form.get("comments") or "").strip()[:2000]
 
-    med_raw = (form.get("medicine_administration") or "").strip().lower()
+    med_key = f"medicine_administration_{ot_id_int}"
+    med_raw = (form.get("medicine_administration") or form.get(med_key) or "").strip().lower()
     medicine_administration = (
         med_raw if med_raw in ("correct", "incorrect") else None
     )

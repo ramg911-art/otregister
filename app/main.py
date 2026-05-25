@@ -1883,6 +1883,17 @@ def get_case_counts_next_14_days(db):
     return "\n".join(lines)
 
 
+def get_next_date_with_cases(db):
+    """Earliest surgery date from today onward that has at least one case."""
+    row = (
+        db.query(OTRegister.date_of_surgery)
+        .filter(OTRegister.date_of_surgery >= date.today())
+        .order_by(OTRegister.date_of_surgery.asc())
+        .first()
+    )
+    return row[0] if row else None
+
+
 # ------------------------------------------------------------
 # DAILY CASE LIST
 # ------------------------------------------------------------
@@ -2607,7 +2618,9 @@ def telegram_polling_loop():
                         "*Available commands*\n\n"
                         "• *cmd* — show this list\n"
                         "• *sort dd/mm/yyyy* — sorted OT list (by IOL, then category) with UHID, name, category, IOL\n"
+                        "• *sort n* — same as sort, for the next date with cases (from today)\n"
                         "• *sortsend dd/mm/yyyy* — same sort, reply without IOL and category\n"
+                        "• *sortsend n* — same as sortsend, for the next date with cases (from today)\n"
                         "• *cased dd/mm/yyyy* — cases for that date\n"
                         "• *case* — case counts for next 14 days\n"
                         "• *caseMMYY* — month summary (e.g. case0226 = Feb 2026)\n"
@@ -2632,18 +2645,22 @@ def telegram_polling_loop():
                 # =====================================
                 if text.startswith("sortsend"):
 
-                    match = re.search(r"\d{2}/\d{2}/\d{4}", text)
-
-                    if not match:
-                        send_telegram_message("Use: sortsend dd/mm/yyyy")
-                        continue
-
-                    target = datetime.strptime(
-                        match.group(), "%d/%m/%Y"
-                    ).date()
-
                     db = SessionLocal()
                     try:
+                        if text == "sortsend n":
+                            target = get_next_date_with_cases(db)
+                            if not target:
+                                send_telegram_message("No upcoming dates with cases.")
+                                continue
+                        else:
+                            match = re.search(r"\d{2}/\d{2}/\d{4}", text)
+                            if not match:
+                                send_telegram_message("Use: sortsend dd/mm/yyyy\nor: sortsend n")
+                                continue
+                            target = datetime.strptime(
+                                match.group(), "%d/%m/%Y"
+                            ).date()
+
                         left_slots, right_slots, intravitreal_pair, pterygium_minor_pair = get_sortsend_slots(db, target)
                         intravitreal_slot, intravitreal_list = intravitreal_pair
                         pterygium_slot, pterygium_minor_list = pterygium_minor_pair
@@ -2666,18 +2683,22 @@ def telegram_polling_loop():
                 # =====================================
                 if text.startswith("sort"):
 
-                    match = re.search(r"\d{2}/\d{2}/\d{4}", text)
-
-                    if not match:
-                        send_telegram_message("Use: sort dd/mm/yyyy")
-                        continue
-
-                    target = datetime.strptime(
-                        match.group(), "%d/%m/%Y"
-                    ).date()
-
                     db = SessionLocal()
                     try:
+                        if text == "sort n":
+                            target = get_next_date_with_cases(db)
+                            if not target:
+                                send_telegram_message("No upcoming dates with cases.")
+                                continue
+                        else:
+                            match = re.search(r"\d{2}/\d{2}/\d{4}", text)
+                            if not match:
+                                send_telegram_message("Use: sort dd/mm/yyyy\nor: sort n")
+                                continue
+                            target = datetime.strptime(
+                                match.group(), "%d/%m/%Y"
+                            ).date()
+
                         left, right, others = get_sorted_ot_list(db, target)
                         if left or right or others:
                             date_str = target.strftime("%d/%m/%Y")

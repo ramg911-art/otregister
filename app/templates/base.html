@@ -148,6 +148,19 @@
                             </a>
                         </li>
                         {% endif %}
+                        {% if user_is_admin(request) %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/reports/sort">
+                                OT Sort report
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/reports/sortsend">
+                                OT Sortsend report
+                            </a>
+                        </li>
+                        {% endif %}
                     </ul>
                 </li>
                 {% endif %}

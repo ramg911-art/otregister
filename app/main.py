@@ -21,7 +21,7 @@ from app.database import (
     migrate_legacy_user_roles,
 )
 from app.models import Base, OTRegister, IOLMaster, User
-from app.auth import router as auth_router, require_login, require_module
+from app.auth import router as auth_router, require_login, require_module, require_admin
 from app.roles import coerce_stored_role, is_administrator, ROLE_ADMINISTRATOR
 from app.permission_middleware import PermissionLoaderMiddleware
 from app.permissions_service import (
@@ -130,6 +130,14 @@ def template_user_can(request: Request, module_key: str) -> bool:
 
 
 templates.env.globals["user_can"] = template_user_can
+
+
+def template_user_is_admin(request: Request) -> bool:
+    user = getattr(request.state, "current_user", None)
+    return is_administrator(user)
+
+
+templates.env.globals["user_is_admin"] = template_user_is_admin
 
 # --------------------------------------------------
 # Auth routes
@@ -2446,6 +2454,168 @@ def generate_sort_png(left, right, others, date_str: str) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def png_bytes_to_pdf(png_bytes: bytes) -> bytes:
+    """Wrap a PNG image in a single-page PDF (same visual as Telegram sort images)."""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png_bytes))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    pdf_buf = io.BytesIO()
+    img.save(pdf_buf, format="PDF")
+    pdf_buf.seek(0)
+    return pdf_buf.getvalue()
+
+
+def _parse_surgery_date_param(surgery_date: str) -> date:
+    return datetime.strptime(surgery_date, "%Y-%m-%d").date()
+
+
+def _build_sort_report_png(db, target_date: date) -> tuple[bytes, bool]:
+    left, right, others = get_sorted_ot_list(db, target_date)
+    has_cases = bool(left or right or others)
+    date_str = target_date.strftime("%d/%m/%Y")
+    png_bytes = generate_sort_png(left, right, others, date_str)
+    return png_bytes, has_cases
+
+
+def _build_sortsend_report_png(db, target_date: date) -> tuple[bytes, bool]:
+    left_slots, right_slots, intravitreal_pair, pterygium_minor_pair = get_sortsend_slots(
+        db, target_date
+    )
+    _, intravitreal_list = intravitreal_pair
+    _, pterygium_minor_list = pterygium_minor_pair
+    has_cases = bool(
+        left_slots or right_slots or intravitreal_list or pterygium_minor_list
+    )
+    date_str = target_date.strftime("%d/%m/%Y")
+    png_bytes = generate_sortsend_png(
+        left_slots, right_slots, intravitreal_pair, pterygium_minor_pair, date_str
+    )
+    return png_bytes, has_cases
+
+
+# ------------------------------------------------------------
+# SORT / SORTSEND REPORTS (admin only; same layout as Telegram)
+# ------------------------------------------------------------
+@app.get("/reports/sort")
+def sort_report_page(
+    request: Request,
+    surgery_date: str | None = None,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if not surgery_date:
+        surgery_date = date.today().isoformat()
+
+    target = _parse_surgery_date_param(surgery_date)
+    _, has_cases = _build_sort_report_png(db, target)
+
+    return templates.TemplateResponse(
+        "reports/ot_sort_report.html",
+        {
+            "request": request,
+            "current_user": admin,
+            "report_title": "Sorted OT List (Sort)",
+            "report_description": (
+                "Same sort as the Telegram <em>sort dd/mm/yyyy</em> command "
+                "(IOL, then category; UHID, name, category, IOL)."
+            ),
+            "report_base_path": "/reports/sort",
+            "surgery_date": surgery_date,
+            "date_display": target.strftime("%d/%m/%Y"),
+            "has_cases": has_cases,
+        },
+    )
+
+
+@app.get("/reports/sort/preview")
+def sort_report_preview(
+    surgery_date: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    target = _parse_surgery_date_param(surgery_date)
+    png_bytes, _ = _build_sort_report_png(db, target)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/reports/sort/pdf")
+def sort_report_pdf(
+    surgery_date: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    target = _parse_surgery_date_param(surgery_date)
+    png_bytes, _ = _build_sort_report_png(db, target)
+    pdf_bytes = png_bytes_to_pdf(png_bytes)
+    filename = f"sort_{target:%Y-%m-%d}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/reports/sortsend")
+def sortsend_report_page(
+    request: Request,
+    surgery_date: str | None = None,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if not surgery_date:
+        surgery_date = date.today().isoformat()
+
+    target = _parse_surgery_date_param(surgery_date)
+    _, has_cases = _build_sortsend_report_png(db, target)
+
+    return templates.TemplateResponse(
+        "reports/ot_sort_report.html",
+        {
+            "request": request,
+            "current_user": admin,
+            "report_title": "Sorted OT List (Sortsend)",
+            "report_description": (
+                "Same layout as the Telegram <em>sortsend dd/mm/yyyy</em> command "
+                "(slot times; UHID and patient name only)."
+            ),
+            "report_base_path": "/reports/sortsend",
+            "surgery_date": surgery_date,
+            "date_display": target.strftime("%d/%m/%Y"),
+            "has_cases": has_cases,
+        },
+    )
+
+
+@app.get("/reports/sortsend/preview")
+def sortsend_report_preview(
+    surgery_date: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    target = _parse_surgery_date_param(surgery_date)
+    png_bytes, _ = _build_sortsend_report_png(db, target)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/reports/sortsend/pdf")
+def sortsend_report_pdf(
+    surgery_date: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    target = _parse_surgery_date_param(surgery_date)
+    png_bytes, _ = _build_sortsend_report_png(db, target)
+    pdf_bytes = png_bytes_to_pdf(png_bytes)
+    filename = f"sortsend_{target:%Y-%m-%d}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ------------------------------------------------------------

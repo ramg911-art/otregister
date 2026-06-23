@@ -14,16 +14,10 @@
 <div class="card shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-end">
         <b>OT List</b>
-
         <form method="get" class="d-flex gap-2 align-items-end">
             <div>
                 <label class="form-label mb-0">Select Date</label>
-                <input
-                    type="date"
-                    name="selected_date"
-                    class="form-control"
-                    value="{{ selected_date }}"
-                >
+                <input type="date" name="selected_date" class="form-control" value="{{ selected_date }}">
             </div>
             <button class="btn btn-primary btn-sm">View</button>
         </form>
@@ -40,41 +34,64 @@
                 <th>Phone</th>
                 <th>Eye</th>
                 <th>Surgery</th>
-                <th>IOL</th>
+                <th style="min-width: 200px;">IOL / Order</th>
                 <th>Surgeon</th>
             </tr>
             </thead>
             <tbody>
             {% for r in records %}
-            <tr
-                oncontextmenu="showContextMenu(event, {{ r.id }})"
-                style="cursor:context-menu;"
-            >
+            {% set iol_ord = iol_order_map.get(r.id) %}
+            <tr oncontextmenu="showContextMenu(event, {{ r.id }})" style="cursor:context-menu;">
                 <td>{{ loop.index }}</td>
                 <td>{{ r.date_of_surgery.strftime('%d/%m/%Y') }}</td>
                 <td>{{ r.patient_uhid }}</td>
                 <td>{{ r.patient_name }}</td>
-                <td
-                    class="ot-phone-cell small"
-                    data-ot-id="{{ r.id }}"
-                    data-fetch-phone="{{ 1 if not r.patient_phone else 0 }}"
-                >
-                    {% if r.patient_phone %}
-                    {{ r.patient_phone }}
-                    {% else %}
-                    <span class="text-muted phone-loading">Loading…</span>
-                    {% endif %}
+                <td class="ot-phone-cell small" data-ot-id="{{ r.id }}" data-fetch-phone="{{ 1 if not r.patient_phone else 0 }}">
+                    {% if r.patient_phone %}{{ r.patient_phone }}{% else %}<span class="text-muted phone-loading">Loading…</span>{% endif %}
                 </td>
                 <td>{{ r.eye }}</td>
                 <td>{{ r.surgery }}</td>
-                <td>{{ r.iol.iol_name if r.iol else '' }}</td>
+                <td class="small">
+                    <div>{{ r.iol.iol_name if r.iol else '—' }}</div>
+                    {% if is_cataract_case(r) %}
+                        {% if iol_ord %}
+                        <div class="mt-1">
+                            <span class="badge {% if iol_ord.status == 'ordered' %}bg-warning text-dark{% elif iol_ord.status == 'lens_delivered' %}bg-success{% elif iol_ord.status in ('mismatch_type', 'mismatch_power') %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {{ iol_status_label(iol_ord.status) }}
+                            </span>
+                            {% if iol_ord.status == 'ordered' %}
+                            <div class="text-muted">{{ iol_ord.ordered_at.strftime('%d/%m/%Y %H:%M') }}</div>
+                            <div class="text-muted">{{ iol_power_display(iol_ord.iol_power) }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="d-flex flex-wrap gap-1 mt-1">
+                            {% if not iol_ord or (can_place_iol_order(iol_ord) and iol_ord.status != 'ordered') %}
+                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1"
+                                onclick="openOrderModal({{ r.id }}, {{ r.iol_id or 'null' }}, '{{ (r.patient_name or '')|e }}')">Order IOL</button>
+                            {% endif %}
+                            {% if iol_ord and iol_ord.status == 'ordered' %}
+                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-1"
+                                onclick="openReceiveModal({{ iol_ord.id }}, {{ iol_ord.iol_id }}, '{{ iol_ord.iol_power }}')">Receive</button>
+                            <a class="btn btn-outline-secondary btn-sm py-0 px-1" target="_blank"
+                                href="/api/iol-orders/{{ iol_ord.id }}/jpg">JPG</a>
+                            {% endif %}
+                            {% if iol_ord and iol_ord.status in ('mismatch_type', 'mismatch_power') %}
+                            <button type="button" class="btn btn-outline-warning btn-sm py-0 px-1"
+                                onclick="openResolveModal({{ iol_ord.id }})">Resolve</button>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-muted small">N/A</span>
+                    {% endif %}
+                </td>
                 <td>{{ r.surgeon_name }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="9" class="text-center text-muted">
-                    No OT entries
-                </td>
+                <td colspan="9" class="text-center text-muted">No OT entries</td>
             </tr>
             {% endfor %}
             </tbody>
@@ -82,29 +99,126 @@
     </div>
 </div>
 
-<!-- ============================= -->
-<!-- RIGHT CLICK CONTEXT MENU -->
-<!-- ============================= -->
-<div id="rowContextMenu"
-     class="ot-floating-panel"
-     style="
-        display:none;
-        position:fixed;
-        z-index:9999;
-        min-width:140px;
-     ">
-    <div class="list-group list-group-flush">
-        <a href="#" id="ctxEdit"
-           class="list-group-item list-group-item-action">
-            Edit
-        </a>
+<!-- Order IOL modal -->
+<div class="modal fade" id="orderIolModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Order IOL — <span id="orderPatientName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="orderOtId">
+                <div class="mb-3">
+                    <label class="form-label">IOL</label>
+                    <select id="orderIolId" class="form-select"></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">IOL power</label>
+                    <div class="input-group">
+                        <input type="text" id="orderIolPower" class="form-control" placeholder="+20.50" pattern="^\+\d{1,2}\.\d{2}$">
+                        <span class="input-group-text">D</span>
+                    </div>
+                    <div class="form-text">Format: +xx.xx (e.g. +20.50)</div>
+                </div>
+                <div id="orderError" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="orderSubmitBtn">Place order</button>
+            </div>
+        </div>
+    </div>
+</div>
 
+<!-- Receive IOL modal -->
+<div class="modal fade" id="receiveIolModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Receive IOL</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="receiveOrderId">
+                <div class="mb-3">
+                    <label class="form-label">IOL type</label>
+                    <select id="receiveIolId" class="form-select"></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">IOL power</label>
+                    <div class="input-group">
+                        <input type="text" id="receiveIolPower" class="form-control" placeholder="+20.50">
+                        <span class="input-group-text">D</span>
+                    </div>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="receiveVerified">
+                    <label class="form-check-label" for="receiveVerified">I verified the IOL details</label>
+                </div>
+                <div id="receiveError" class="alert alert-danger d-none"></div>
+                <hr>
+                <p class="small text-muted mb-2">If details do not match the order:</p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="submitMismatch('lens_type')">Lens type mismatch</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="submitMismatch('iol_power')">IOL power mismatch</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="receiveSubmitBtn">Lens delivered</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Resolve mismatch modal -->
+<div class="modal fade" id="resolveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Resolve lens mismatch</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="resolveOrderId">
+                <div class="mb-3">
+                    <label class="form-label">Action</label>
+                    <select id="resolveAction" class="form-select">
+                        <option value="reordered">Re-ordered</option>
+                        <option value="postponed">Case to be postponed</option>
+                        <option value="other">Others</option>
+                    </select>
+                </div>
+                <div id="reorderFields" class="mb-3">
+                    <label class="form-label">New IOL</label>
+                    <select id="resolveIolId" class="form-select mb-2"></select>
+                    <label class="form-label">New IOL power</label>
+                    <div class="input-group">
+                        <input type="text" id="resolveIolPower" class="form-control" placeholder="+20.50">
+                        <span class="input-group-text">D</span>
+                    </div>
+                </div>
+                <div id="resolveNotesWrap" class="mb-3 d-none">
+                    <label class="form-label">Reason</label>
+                    <textarea id="resolveNotes" class="form-control" rows="2"></textarea>
+                </div>
+                <div id="resolveError" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="resolveSubmitBtn">Submit</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="rowContextMenu" class="ot-floating-panel" style="display:none;position:fixed;z-index:9999;min-width:140px;">
+    <div class="list-group list-group-flush">
+        <a href="#" id="ctxEdit" class="list-group-item list-group-item-action">Edit</a>
         <form id="ctxDeleteForm" method="post" style="margin:0;">
-            <button type="submit"
-                    class="list-group-item list-group-item-action text-danger"
-                    onclick="return confirm('Delete this OT entry?');">
-                Delete
-            </button>
+            <button type="submit" class="list-group-item list-group-item-action text-danger"
+                onclick="return confirm('Delete this OT entry?');">Delete</button>
         </form>
     </div>
 </div>
@@ -113,35 +227,188 @@
 
 {% block scripts %}
 <script>
+let iolCatalog = [];
+
 function showContextMenu(event, otId) {
     event.preventDefault();
-
     const menu = document.getElementById("rowContextMenu");
-    const editLink = document.getElementById("ctxEdit");
-    const deleteForm = document.getElementById("ctxDeleteForm");
-
-    editLink.href = `/ot/${otId}/edit`;
-    deleteForm.action = `/ot/${otId}/delete?selected_date={{ selected_date }}`;
-
+    document.getElementById("ctxEdit").href = `/ot/${otId}/edit`;
+    document.getElementById("ctxDeleteForm").action = `/ot/${otId}/delete?selected_date={{ selected_date }}`;
     menu.style.top = event.clientY + "px";
     menu.style.left = event.clientX + "px";
     menu.style.display = "block";
 }
+document.addEventListener("click", () => { document.getElementById("rowContextMenu").style.display = "none"; });
+document.addEventListener("scroll", () => { document.getElementById("rowContextMenu").style.display = "none"; });
 
-// Hide menu on left click or scroll
-document.addEventListener("click", () => {
-    document.getElementById("rowContextMenu").style.display = "none";
+function fillIolSelect(sel, defaultId) {
+    sel.innerHTML = "";
+    iolCatalog.forEach((i) => {
+        const opt = document.createElement("option");
+        opt.value = i.id;
+        opt.textContent = i.name + (i.supplier_name ? ` (${i.supplier_name})` : "");
+        if (!i.has_supplier) opt.textContent += " — no supplier";
+        opt.disabled = !i.has_supplier;
+        sel.appendChild(opt);
+    });
+    if (defaultId) sel.value = String(defaultId);
+}
+
+function loadIolCatalog() {
+    return fetch("/api/iol-orders/meta")
+        .then((r) => r.json())
+        .then((data) => { iolCatalog = data.iols || []; });
+}
+
+const orderModal = new bootstrap.Modal(document.getElementById("orderIolModal"));
+const receiveModal = new bootstrap.Modal(document.getElementById("receiveIolModal"));
+const resolveModal = new bootstrap.Modal(document.getElementById("resolveModal"));
+
+function openOrderModal(otId, defaultIolId, patientName) {
+    document.getElementById("orderOtId").value = otId;
+    document.getElementById("orderPatientName").textContent = patientName || "";
+    document.getElementById("orderIolPower").value = "";
+    document.getElementById("orderError").classList.add("d-none");
+    fillIolSelect(document.getElementById("orderIolId"), defaultIolId);
+    orderModal.show();
+}
+
+function openReceiveModal(orderId, iolId, power) {
+    document.getElementById("receiveOrderId").value = orderId;
+    document.getElementById("receiveVerified").checked = false;
+    document.getElementById("receiveError").classList.add("d-none");
+    fillIolSelect(document.getElementById("receiveIolId"), iolId);
+    document.getElementById("receiveIolPower").value = power || "";
+    receiveModal.show();
+}
+
+function openResolveModal(orderId) {
+    document.getElementById("resolveOrderId").value = orderId;
+    document.getElementById("resolveError").classList.add("d-none");
+    document.getElementById("resolveNotes").value = "";
+    fillIolSelect(document.getElementById("resolveIolId"), null);
+    document.getElementById("resolveAction").value = "reordered";
+    toggleResolveFields();
+    resolveModal.show();
+}
+
+function toggleResolveFields() {
+    const action = document.getElementById("resolveAction").value;
+    document.getElementById("reorderFields").style.display = action === "reordered" ? "block" : "none";
+    document.getElementById("resolveNotesWrap").classList.toggle("d-none", action !== "other");
+}
+
+document.getElementById("resolveAction").addEventListener("change", toggleResolveFields);
+
+document.getElementById("orderSubmitBtn").addEventListener("click", () => {
+    const err = document.getElementById("orderError");
+    err.classList.add("d-none");
+    const body = {
+        ot_register_id: parseInt(document.getElementById("orderOtId").value, 10),
+        iol_id: parseInt(document.getElementById("orderIolId").value, 10),
+        iol_power: document.getElementById("orderIolPower").value.trim(),
+    };
+    fetch("/api/iol-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) {
+                err.textContent = d.error || "Order failed";
+                err.classList.remove("d-none");
+                return;
+            }
+            if (d.jpg_url) window.open(d.jpg_url, "_blank");
+            location.reload();
+        });
 });
-document.addEventListener("scroll", () => {
-    document.getElementById("rowContextMenu").style.display = "none";
+
+document.getElementById("receiveSubmitBtn").addEventListener("click", () => {
+    const err = document.getElementById("receiveError");
+    err.classList.add("d-none");
+    const orderId = document.getElementById("receiveOrderId").value;
+    const body = {
+        iol_id: parseInt(document.getElementById("receiveIolId").value, 10),
+        iol_power: document.getElementById("receiveIolPower").value.trim(),
+        verified: document.getElementById("receiveVerified").checked,
+    };
+    fetch(`/api/iol-orders/${orderId}/receive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) {
+                err.textContent = d.error || "Failed";
+                err.classList.remove("d-none");
+                return;
+            }
+            receiveModal.hide();
+            location.reload();
+        });
 });
+
+function submitMismatch(kind) {
+    const err = document.getElementById("receiveError");
+    err.classList.add("d-none");
+    const orderId = document.getElementById("receiveOrderId").value;
+    if (!confirm(kind === "lens_type" ? "Report lens type mismatch?" : "Report IOL power mismatch?")) return;
+    fetch(`/api/iol-orders/${orderId}/mismatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mismatch_kind: kind }),
+    })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) {
+                err.textContent = d.error || "Failed";
+                err.classList.remove("d-none");
+                return;
+            }
+            receiveModal.hide();
+            location.reload();
+        });
+}
+
+document.getElementById("resolveSubmitBtn").addEventListener("click", () => {
+    const err = document.getElementById("resolveError");
+    err.classList.add("d-none");
+    const orderId = document.getElementById("resolveOrderId").value;
+    const action = document.getElementById("resolveAction").value;
+    const body = {
+        resolution_action: action,
+        resolution_notes: document.getElementById("resolveNotes").value.trim(),
+    };
+    if (action === "reordered") {
+        body.reorder_iol_id = parseInt(document.getElementById("resolveIolId").value, 10);
+        body.reorder_iol_power = document.getElementById("resolveIolPower").value.trim();
+    }
+    fetch(`/api/iol-orders/${orderId}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) {
+                err.textContent = d.error || "Failed";
+                err.classList.remove("d-none");
+                return;
+            }
+            if (d.new_order && d.new_order.jpg_url) window.open(d.new_order.jpg_url, "_blank");
+            resolveModal.hide();
+            location.reload();
+        });
+});
+
+loadIolCatalog();
 
 (function () {
-    const cells = Array.from(
-        document.querySelectorAll(".ot-phone-cell[data-fetch-phone='1']")
-    );
+    const cells = Array.from(document.querySelectorAll(".ot-phone-cell[data-fetch-phone='1']"));
     if (!cells.length) return;
-
     const params = new URLSearchParams({ selected_date: "{{ selected_date }}" });
     fetch("/api/dashboard/phones?" + params.toString())
         .then((res) => res.json())
@@ -149,13 +416,10 @@ document.addEventListener("scroll", () => {
             const phones = (data && data.phones) || {};
             cells.forEach((td) => {
                 const id = td.getAttribute("data-ot-id");
-                const p =
-                    phones[id] !== undefined ? phones[id] : phones[String(id)];
+                const p = phones[id] !== undefined ? phones[id] : phones[String(id)];
                 const s = p != null ? String(p).trim() : "";
                 td.innerHTML = "";
-                td.appendChild(
-                    document.createTextNode(s ? s : "—")
-                );
+                td.appendChild(document.createTextNode(s ? s : "—"));
             });
         })
         .catch(() => {

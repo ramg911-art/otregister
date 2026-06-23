@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}IOL Supplier Master{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <b>IOL Supplier Master</b>
+        <a href="/iol" class="btn btn-outline-secondary btn-sm">IOL Master</a>
+    </div>
+
+    <div class="card-body">
+        {% if request.query_params.get('error') == 'in_use' %}
+        <div class="alert alert-warning">Cannot delete — one or more IOLs are mapped to this supplier.</div>
+        {% endif %}
+
+        <form method="post" action="/admin/suppliers/add" class="row g-2 mb-4">
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Supplier name</label>
+                <input type="text" name="supplier_name" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Supplier phone</label>
+                <input type="text" name="supplier_phone" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Contact person</label>
+                <input type="text" name="contact_person_name" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Contact phone</label>
+                <input type="text" name="contact_person_phone" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary btn-sm w-100">Add supplier</button>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-light">
+                <tr>
+                    <th>Supplier</th>
+                    <th>Phone</th>
+                    <th>Contact person</th>
+                    <th>Contact phone</th>
+                    <th style="width: 48%;">Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for s in suppliers %}
+                <tr>
+                    <td colspan="5" class="p-0">
+                        <form method="post" action="/admin/suppliers/{{ s.id }}/edit" class="d-flex flex-wrap gap-1 p-2 align-items-center">
+                            <input name="supplier_name" class="form-control form-control-sm" style="max-width:160px" value="{{ s.supplier_name }}" required>
+                            <input name="supplier_phone" class="form-control form-control-sm" style="max-width:120px" value="{{ s.supplier_phone }}" required>
+                            <input name="contact_person_name" class="form-control form-control-sm" style="max-width:140px" value="{{ s.contact_person_name }}" required>
+                            <input name="contact_person_phone" class="form-control form-control-sm" style="max-width:120px" value="{{ s.contact_person_phone }}" required>
+                            <button class="btn btn-sm btn-primary">Save</button>
+                        </form>
+                        <form method="post" action="/admin/suppliers/{{ s.id }}/delete" class="px-2 pb-2" onsubmit="return confirm('Delete this supplier?');">
+                            <button class="btn btn-sm btn-outline-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-3">No suppliers yet</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

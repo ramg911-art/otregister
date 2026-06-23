@@ -378,3 +378,151 @@ def ensure_patient_feedback_updated_by_column(engine):
                 )
         except Exception:
             pass
+
+
+def ensure_iol_order_schema(engine):
+    """IOL supplier, order tables, and iol_master.supplier_id (SQLite + PostgreSQL)."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        is_sqlite = engine.url.drivername == "sqlite"
+
+        if is_sqlite:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS iol_supplier (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        supplier_name VARCHAR(200) NOT NULL,
+                        supplier_phone VARCHAR(32) NOT NULL,
+                        contact_person_name VARCHAR(120) NOT NULL,
+                        contact_person_phone VARCHAR(32) NOT NULL
+                    )
+                    """
+                )
+            )
+            rows = conn.execute(text("PRAGMA table_info(iol_master)")).fetchall()
+            col_names = {row[1] for row in rows}
+            if "supplier_id" not in col_names:
+                conn.execute(
+                    text("ALTER TABLE iol_master ADD COLUMN supplier_id INTEGER")
+                )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS iol_order (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ot_register_id INTEGER NOT NULL,
+                        iol_id INTEGER NOT NULL,
+                        iol_power VARCHAR(16) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'ordered',
+                        ordered_at DATETIME NOT NULL,
+                        ordered_by_user_id INTEGER NOT NULL,
+                        order_jpg_path VARCHAR(512),
+                        received_at DATETIME,
+                        received_by_user_id INTEGER,
+                        mismatch_kind VARCHAR(16),
+                        resolution_action VARCHAR(32),
+                        resolution_notes TEXT,
+                        superseded_by_order_id INTEGER,
+                        FOREIGN KEY(ot_register_id) REFERENCES ot_register(id) ON DELETE CASCADE,
+                        FOREIGN KEY(iol_id) REFERENCES iol_master(id),
+                        FOREIGN KEY(ordered_by_user_id) REFERENCES users(id),
+                        FOREIGN KEY(received_by_user_id) REFERENCES users(id),
+                        FOREIGN KEY(superseded_by_order_id) REFERENCES iol_order(id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS iol_order_status_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        iol_order_id INTEGER NOT NULL,
+                        action VARCHAR(64) NOT NULL,
+                        from_status VARCHAR(32),
+                        to_status VARCHAR(32) NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        notes TEXT,
+                        created_at DATETIME NOT NULL,
+                        FOREIGN KEY(iol_order_id) REFERENCES iol_order(id) ON DELETE CASCADE,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+            )
+            return
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.iol_supplier (
+                    id SERIAL PRIMARY KEY,
+                    supplier_name VARCHAR(200) NOT NULL,
+                    supplier_phone VARCHAR(32) NOT NULL,
+                    contact_person_name VARCHAR(120) NOT NULL,
+                    contact_person_phone VARCHAR(32) NOT NULL
+                )
+                """
+            )
+        )
+
+        def _has_col(table: str, column: str) -> bool:
+            n = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = :t AND column_name = :c
+                    """
+                ),
+                {"t": table, "c": column},
+            ).scalar()
+            return int(n or 0) > 0
+
+        if not _has_col("iol_master", "supplier_id"):
+            conn.execute(
+                text(
+                    "ALTER TABLE public.iol_master ADD COLUMN supplier_id INTEGER "
+                    "REFERENCES public.iol_supplier(id)"
+                )
+            )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.iol_order (
+                    id SERIAL PRIMARY KEY,
+                    ot_register_id INTEGER NOT NULL REFERENCES public.ot_register(id) ON DELETE CASCADE,
+                    iol_id INTEGER NOT NULL REFERENCES public.iol_master(id),
+                    iol_power VARCHAR(16) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'ordered',
+                    ordered_at TIMESTAMP NOT NULL,
+                    ordered_by_user_id INTEGER NOT NULL REFERENCES public.users(id),
+                    order_jpg_path VARCHAR(512),
+                    received_at TIMESTAMP,
+                    received_by_user_id INTEGER REFERENCES public.users(id),
+                    mismatch_kind VARCHAR(16),
+                    resolution_action VARCHAR(32),
+                    resolution_notes TEXT,
+                    superseded_by_order_id INTEGER REFERENCES public.iol_order(id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.iol_order_status_log (
+                    id SERIAL PRIMARY KEY,
+                    iol_order_id INTEGER NOT NULL REFERENCES public.iol_order(id) ON DELETE CASCADE,
+                    action VARCHAR(64) NOT NULL,
+                    from_status VARCHAR(32),
+                    to_status VARCHAR(32) NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES public.users(id),
+                    notes TEXT,
+                    created_at TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )

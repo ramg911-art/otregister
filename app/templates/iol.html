@@ -6,11 +6,14 @@
 
 <div class="container mt-4 mb-5">
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4>IOL Master</h4>
-        <a href="/dashboard" class="btn btn-outline-secondary btn-sm">
-            Back
-        </a>
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 class="mb-0">IOL Master</h4>
+        <div class="d-flex gap-2">
+            {% if user_can(request, 'admin_suppliers') %}
+            <a href="/admin/suppliers" class="btn btn-outline-primary btn-sm">Supplier Master</a>
+            {% endif %}
+            <a href="/dashboard" class="btn btn-outline-secondary btn-sm">Back</a>
+        </div>
     </div>
 
     {% if request.query_params.get('error') %}
@@ -20,57 +23,42 @@
     </div>
     {% endif %}
 
-    <!-- ===================== -->
-    <!-- ADD IOL -->
-    <!-- ===================== -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="post" action="/iol/add" class="row g-3">
-
-                <div class="col-md-5">
+                <div class="col-md-4">
                     <label class="form-label">IOL Name</label>
-                    <input
-                        type="text"
-                        name="name"
-                        class="form-control"
-                        placeholder="Enter IOL Name"
-                        required
-                    >
+                    <input type="text" name="name" class="form-control" placeholder="Enter IOL Name" required>
                 </div>
-
-                <div class="col-md-5">
+                <div class="col-md-3">
                     <label class="form-label">Package</label>
-                    <input
-                        type="text"
-                        name="package"
-                        class="form-control"
-                        placeholder="Enter Package Cost"
-                        required
-                    >
+                    <input type="text" name="package" class="form-control" placeholder="Package cost" required>
                 </div>
-
+                <div class="col-md-3">
+                    <label class="form-label">Supplier</label>
+                    <select name="supplier_id" class="form-select">
+                        <option value="">— Select supplier —</option>
+                        {% for s in suppliers %}
+                        <option value="{{ s.id }}">{{ s.supplier_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div class="col-md-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">
-                        Add IOL
-                    </button>
+                    <button type="submit" class="btn btn-primary w-100">Add IOL</button>
                 </div>
-
             </form>
         </div>
     </div>
 
-    <!-- ===================== -->
-    <!-- IOL LIST -->
-    <!-- ===================== -->
     <div class="card">
         <div class="card-body p-0">
-
             <table class="table table-bordered table-sm align-middle mb-0">
                 <thead class="table-light">
                     <tr>
                         <th>IOL Name</th>
                         <th>Package</th>
-                        <th width="260">Action</th>
+                        <th>Supplier</th>
+                        <th width="320">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -78,55 +66,41 @@
                     <tr>
                         <td>{{ iol.iol_name }}</td>
                         <td>{{ iol.package }}</td>
-
+                        <td>{{ iol.supplier.supplier_name if iol.supplier else '—' }}</td>
                         <td>
-                            <!-- EDIT -->
-                            <form method="post"
-                                  action="/iol/{{ iol.id }}/edit"
-                                  class="d-flex gap-1 mb-1">
-
-                                <input
-                                    class="form-control form-control-sm"
-                                    name="name"
-                                    value="{{ iol.iol_name }}"
-                                    required
-                                >
-
-                                <input
-                                    class="form-control form-control-sm"
-                                    name="package"
-                                    value="{{ iol.package }}"
-                                    required
-                                >
-
-                                <button class="btn btn-sm btn-primary">
-                                    Save
-                                </button>
+                            <form method="post" action="/iol/{{ iol.id }}/edit" class="row g-1">
+                                <div class="col-12">
+                                    <input class="form-control form-control-sm" name="name" value="{{ iol.iol_name }}" required>
+                                </div>
+                                <div class="col-12">
+                                    <input class="form-control form-control-sm" name="package" value="{{ iol.package }}" required>
+                                </div>
+                                <div class="col-12">
+                                    <select name="supplier_id" class="form-select form-select-sm">
+                                        <option value="">— No supplier —</option>
+                                        {% for s in suppliers %}
+                                        <option value="{{ s.id }}" {% if iol.supplier_id == s.id %}selected{% endif %}>{{ s.supplier_name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-12 d-flex gap-1">
+                                    <button class="btn btn-sm btn-primary flex-grow-1">Save</button>
+                                </div>
                             </form>
-
-                            <!-- DELETE -->
-                            <form method="post"
-                                  action="/iol/{{ iol.id }}/delete"
-                                  onsubmit="return confirm('Delete this IOL?');">
-                                <button class="btn btn-sm btn-danger w-100">
-                                    Delete
-                                </button>
+                            <form method="post" action="/iol/{{ iol.id }}/delete" onsubmit="return confirm('Delete this IOL?');" class="mt-1">
+                                <button class="btn btn-sm btn-danger w-100">Delete</button>
                             </form>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="3" class="text-center text-muted py-3">
-                            No IOLs found
-                        </td>
+                        <td colspan="4" class="text-center text-muted py-3">No IOLs found</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
-
         </div>
     </div>
-
 </div>
 
 {% endblock %}

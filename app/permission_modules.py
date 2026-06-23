@@ -37,6 +37,7 @@ MODULE_DEFINITIONS: tuple[ModuleDef, ...] = (
     ModuleDef("admin_users", "User management", SECTION_ADMIN),
     ModuleDef("admin_drugs", "Intravitreal drug master", SECTION_ADMIN),
     ModuleDef("admin_dashboard", "Admin dashboard (statistics)", SECTION_ADMIN),
+    ModuleDef("admin_suppliers", "IOL supplier master", SECTION_ADMIN),
     ModuleDef("admin_permissions", "Role permissions matrix", SECTION_ADMIN),
 )
 
@@ -77,6 +78,7 @@ def landing_path_priority() -> list[tuple[str, str]]:
         ("admin_dashboard", "/admin/dashboard"),
         ("admin_users", "/admin/users"),
         ("admin_drugs", "/admin/drugs"),
+        ("admin_suppliers", "/admin/suppliers"),
         ("admin_permissions", "/admin/permissions"),
         ("iol_master", "/iol"),
         ("account_password", "/change-password"),

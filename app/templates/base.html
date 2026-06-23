@@ -106,7 +106,7 @@
                 </li>
                 {% endif %}
 
-                {% if user_can(request, 'admin_dashboard') or user_can(request, 'admin_users') or user_can(request, 'iol_master') or user_can(request, 'admin_drugs') or user_can(request, 'admin_permissions') %}
+                {% if user_can(request, 'admin_dashboard') or user_can(request, 'admin_users') or user_can(request, 'iol_master') or user_can(request, 'admin_drugs') or user_can(request, 'admin_suppliers') or user_can(request, 'admin_permissions') %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle text-warning" href="#"
                        role="button" data-bs-toggle="dropdown">
@@ -139,6 +139,13 @@
                          <a class="dropdown-item" href="/admin/drugs">
                              Intravitreal Drug Master
                       </a>
+                        </li>
+                        {% endif %}
+                        {% if user_can(request, 'admin_suppliers') %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/suppliers">
+                                IOL Supplier Master
+                            </a>
                         </li>
                         {% endif %}
                         {% if user_can(request, 'admin_permissions') %}

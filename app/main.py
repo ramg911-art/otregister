@@ -19,8 +19,9 @@ from app.database import (
     ensure_patient_feedback_medicine_column,
     ensure_patient_feedback_updated_by_column,
     migrate_legacy_user_roles,
+    ensure_iol_order_schema,
 )
-from app.models import Base, OTRegister, IOLMaster, User
+from app.models import Base, OTRegister, IOLMaster, IOLSupplier, User
 from app.auth import router as auth_router, require_login, require_module, require_admin
 from app.roles import coerce_stored_role, is_administrator, ROLE_ADMINISTRATOR
 from app.permission_middleware import PermissionLoaderMiddleware
@@ -87,6 +88,7 @@ except Exception:
 ensure_ot_register_patient_contact_columns(engine)
 ensure_patient_feedback_medicine_column(engine)
 ensure_patient_feedback_updated_by_column(engine)
+ensure_iol_order_schema(engine)
 
 # Fix PostgreSQL id defaults and sequences at startup (after SQLite→PG migration)
 # Fixes "null value in column id violates not-null" and duplicate key on id
@@ -94,7 +96,7 @@ try:
     if not (engine.url.drivername == "sqlite"):
         _db = SessionLocal()
         try:
-            for _t in ("users", "ot_register", "iol_master", "intravitreal_drug_master"):
+            for _t in ("users", "ot_register", "iol_master", "intravitreal_drug_master", "iol_supplier", "iol_order", "iol_order_status_log"):
                 ensure_postgres_id_default(_db, _t)
             _db.commit()
         except Exception:
@@ -139,10 +141,25 @@ def template_user_is_admin(request: Request) -> bool:
 
 templates.env.globals["user_is_admin"] = template_user_is_admin
 
+from app.iol_order_service import (
+    can_place_order as _can_place_iol_order,
+    is_cataract_case as _is_cataract_case,
+    status_display_label as _iol_status_label,
+    format_iol_power_display as _iol_power_display,
+)
+
+templates.env.globals["can_place_iol_order"] = _can_place_iol_order
+templates.env.globals["is_cataract_case"] = _is_cataract_case
+templates.env.globals["iol_status_label"] = _iol_status_label
+templates.env.globals["iol_power_display"] = _iol_power_display
+
 # --------------------------------------------------
 # Auth routes
 # --------------------------------------------------
+from app.iol_order_routes import router as iol_order_router
+
 app.include_router(auth_router)
+app.include_router(iol_order_router)
 def get_current_user(db: Session, user_id: int):
     return db.query(User).filter(User.id == user_id).first()
 # --------------------------------------------------
@@ -152,9 +169,10 @@ from datetime import date, datetime
 from fastapi import Request, Depends
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import OTRegister, User
+from app.models import OTRegister, User, IOLMaster, IOLSupplier
 from app.database import get_db
 from app.auth import require_login
+from app.iol_order_service import latest_orders_for_ot_ids
 
 
 @app.get("/dashboard")
@@ -174,10 +192,15 @@ def dashboard(
 
     records = (
         db.query(OTRegister)
+        .options(joinedload(OTRegister.iol))
         .filter(OTRegister.date_of_surgery == day)
         .order_by(OTRegister.id.asc())
         .all()
     )
+
+    ot_ids = [r.id for r in records]
+    iol_order_map = latest_orders_for_ot_ids(db, ot_ids)
+    iols = db.query(IOLMaster).order_by(IOLMaster.iol_name.asc()).all()
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -188,6 +211,8 @@ def dashboard(
             "current_user": current_user,
             "save_error": error,
             "save_error_message": message or "",
+            "iol_order_map": iol_order_map,
+            "iols": iols,
         },
     )
 
@@ -658,21 +683,32 @@ def iol_master(
     current_user: User = Depends(require_module("iol_master")),
 ):
 
-    iols = db.query(IOLMaster).order_by(IOLMaster.iol_name.asc()).all()
+    iols = (
+        db.query(IOLMaster)
+        .options(joinedload(IOLMaster.supplier))
+        .order_by(IOLMaster.iol_name.asc())
+        .all()
+    )
+    suppliers = db.query(IOLSupplier).order_by(IOLSupplier.supplier_name.asc()).all()
 
     return templates.TemplateResponse(
         "iol.html",
         {
             "request": request,
             "iols": iols,
-            "current_user": current_user,  # ✅ REQUIRED
+            "suppliers": suppliers,
+            "current_user": current_user,
         },
     )
 
 
-def _iol_add_attempt(db, name: str, package: str) -> None:
+def _iol_add_attempt(db, name: str, package: str, supplier_id: int | None = None) -> None:
     """Insert one IOL row (caller commits)."""
-    iol = IOLMaster(iol_name=name.strip(), package=package.strip())
+    iol = IOLMaster(
+        iol_name=name.strip(),
+        package=package.strip(),
+        supplier_id=supplier_id or None,
+    )
     db.add(iol)
 
 
@@ -681,11 +717,13 @@ def add_iol(
     request: Request,
     name: str = Form(...),
     package: str = Form(...),
+    supplier_id: str = Form(""),
     _iol: User = Depends(require_module("iol_master")),
     db: Session = Depends(get_db),
 ):
     nm = (name or "").strip()
     pkg = (package or "").strip()
+    sid = int(supplier_id) if (supplier_id or "").strip().isdigit() else None
     if not nm or not pkg:
         return RedirectResponse(
             "/iol?error=save&message=" + quote("Name and package are required."),
@@ -698,7 +736,7 @@ def add_iol(
             ensure_postgres_id_default(db, "iol_master")
             reset_id_sequence(db, "iol_master")
 
-        _iol_add_attempt(db, nm, pkg)
+        _iol_add_attempt(db, nm, pkg, sid)
         try:
             db.commit()
         except IntegrityError:
@@ -707,7 +745,7 @@ def add_iol(
             if db.get_bind().url.drivername != "sqlite":
                 ensure_postgres_id_default(db, "iol_master")
                 reset_id_sequence(db, "iol_master")
-            _iol_add_attempt(db, nm, pkg)
+            _iol_add_attempt(db, nm, pkg, sid)
             db.commit()
     except IntegrityError as e:
         db.rollback()
@@ -734,6 +772,7 @@ def edit_iol(
     iol_id: int,
     name: str = Form(...),
     package: str = Form(...),
+    supplier_id: str = Form(""),
     db: Session = Depends(get_db),
     _iol: User = Depends(require_module("iol_master")),
 ):
@@ -743,6 +782,7 @@ def edit_iol(
 
     iol.iol_name = name
     iol.package = package
+    iol.supplier_id = int(supplier_id) if (supplier_id or "").strip().isdigit() else None
     db.commit()
 
     return RedirectResponse("/iol", status_code=303)

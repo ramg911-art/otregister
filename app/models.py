@@ -29,6 +29,21 @@ class RolePermission(Base):
 
 
 # --------------------------------------------------
+# IOL Supplier master
+# --------------------------------------------------
+class IOLSupplier(Base):
+    __tablename__ = "iol_supplier"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_name = Column(String(200), nullable=False)
+    supplier_phone = Column(String(32), nullable=False)
+    contact_person_name = Column(String(120), nullable=False)
+    contact_person_phone = Column(String(32), nullable=False)
+
+    iols = relationship("IOLMaster", back_populates="supplier")
+
+
+# --------------------------------------------------
 # IOL Master table
 # --------------------------------------------------
 class IOLMaster(Base):
@@ -37,12 +52,14 @@ class IOLMaster(Base):
     id = Column(Integer, primary_key=True, index=True)
     iol_name = Column(String(100), nullable=False)
     package = Column(String(50), nullable=False)
+    supplier_id = Column(Integer, ForeignKey("iol_supplier.id"), nullable=True)
+    supplier = relationship("IOLSupplier", back_populates="iols")
 
     # Relationship to OT Register
     ot_records = relationship(
         "OTRegister",
         back_populates="iol",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
 
 
@@ -93,6 +110,13 @@ class OTRegister(Base):
         cascade="all, delete-orphan",
     )
 
+    iol_orders = relationship(
+        "IOLOrder",
+        back_populates="ot_register",
+        cascade="all, delete-orphan",
+        order_by="IOLOrder.id",
+    )
+
 
 class PatientFeedback(Base):
     """Post-discharge feedback for an OT register row (one row per case)."""
@@ -130,3 +154,62 @@ class IntravitrealDrugMaster(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     drug_name = Column(String, unique=True, nullable=False)
+
+
+# --------------------------------------------------
+# IOL order tracking (per OT case)
+# --------------------------------------------------
+class IOLOrder(Base):
+    __tablename__ = "iol_order"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ot_register_id = Column(
+        Integer, ForeignKey("ot_register.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    iol_id = Column(Integer, ForeignKey("iol_master.id"), nullable=False)
+    iol_power = Column(String(16), nullable=False)
+
+    # ordered | lens_delivered | mismatch_type | mismatch_power |
+    # resolved_reordered | resolved_postponed | resolved_other
+    status = Column(String(32), nullable=False, default="ordered")
+
+    ordered_at = Column(DateTime, nullable=False)
+    ordered_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    order_jpg_path = Column(String(512), nullable=True)
+
+    received_at = Column(DateTime, nullable=True)
+    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    mismatch_kind = Column(String(16), nullable=True)  # lens_type | iol_power
+    resolution_action = Column(String(32), nullable=True)  # reordered | postponed | other
+    resolution_notes = Column(Text, nullable=True)
+    superseded_by_order_id = Column(Integer, ForeignKey("iol_order.id"), nullable=True)
+
+    ot_register = relationship("OTRegister", back_populates="iol_orders")
+    iol = relationship("IOLMaster")
+    ordered_by = relationship("User", foreign_keys=[ordered_by_user_id])
+    received_by = relationship("User", foreign_keys=[received_by_user_id])
+    status_logs = relationship(
+        "IOLOrderStatusLog",
+        back_populates="iol_order",
+        cascade="all, delete-orphan",
+        order_by="IOLOrderStatusLog.id",
+    )
+
+
+class IOLOrderStatusLog(Base):
+    __tablename__ = "iol_order_status_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    iol_order_id = Column(
+        Integer, ForeignKey("iol_order.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action = Column(String(64), nullable=False)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    iol_order = relationship("IOLOrder", back_populates="status_logs")
+    user = relationship("User")

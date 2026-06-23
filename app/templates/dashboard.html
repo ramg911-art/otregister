@@ -64,6 +64,7 @@
                             <div class="text-muted">{{ iol_power_display(iol_ord.iol_power) }}</div>
                             {% endif %}
                         </div>
+                        {% endif %}
                         <div class="d-flex flex-wrap gap-1 mt-1">
                             {% if not iol_ord or (can_place_iol_order(iol_ord) and iol_ord.status != 'ordered') %}
                             <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1"
@@ -80,9 +81,6 @@
                                 onclick="openResolveModal({{ iol_ord.id }})">Resolve</button>
                             {% endif %}
                         </div>
-                        {% else %}
-                        <span class="text-muted">—</span>
-                        {% endif %}
                     {% else %}
                     <span class="text-muted small">N/A</span>
                     {% endif %}

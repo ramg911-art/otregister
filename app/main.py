@@ -110,48 +110,9 @@ except Exception:
 # Static & templates
 # --------------------------------------------------
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-templates = Jinja2Templates(directory="app/templates")
-# -----------------------------
-# Global date format filter
-# -----------------------------
-def format_date(value):
-    if not value:
-        return ""
-    if isinstance(value, (date, datetime)):
-        return value.strftime("%d/%m/%Y")
-    return value
+from app.templating import templates, register_iol_template_globals
 
-templates.env.filters["datefmt"] = format_date
-
-
-def template_user_can(request: Request, module_key: str) -> bool:
-    allowed = getattr(request.state, "allowed_modules", None)
-    if not allowed:
-        return False
-    return module_key in allowed
-
-
-templates.env.globals["user_can"] = template_user_can
-
-
-def template_user_is_admin(request: Request) -> bool:
-    user = getattr(request.state, "current_user", None)
-    return is_administrator(user)
-
-
-templates.env.globals["user_is_admin"] = template_user_is_admin
-
-from app.iol_order_service import (
-    can_place_order as _can_place_iol_order,
-    is_cataract_case as _is_cataract_case,
-    status_display_label as _iol_status_label,
-    format_iol_power_display as _iol_power_display,
-)
-
-templates.env.globals["can_place_iol_order"] = _can_place_iol_order
-templates.env.globals["is_cataract_case"] = _is_cataract_case
-templates.env.globals["iol_status_label"] = _iol_status_label
-templates.env.globals["iol_power_display"] = _iol_power_display
+register_iol_template_globals()
 
 # --------------------------------------------------
 # Auth routes

@@ -4,12 +4,12 @@ import os
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
 from urllib.parse import quote
 
 from app.auth import require_module
 from app.database import get_db
+from app.templating import templates
 from app.iol_order_service import (
     STATUS_MISMATCH_POWER,
     STATUS_MISMATCH_TYPE,
@@ -27,7 +27,6 @@ from app.iol_order_service import (
 from app.models import IOLMaster, IOLSupplier, IOLOrder, OTRegister, User
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _json_error(message: str, status: int = 400) -> JSONResponse:
@@ -288,6 +287,7 @@ def api_order_jpg(
 def _order_json(order: IOLOrder) -> dict:
     return {
         "id": order.id,
+        "order_no": order.order_no or "",
         "ot_register_id": order.ot_register_id,
         "iol_id": order.iol_id,
         "iol_name": order.iol.iol_name if order.iol else "",

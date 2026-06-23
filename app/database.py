@@ -418,6 +418,7 @@ def ensure_iol_order_schema(engine):
                         status VARCHAR(32) NOT NULL DEFAULT 'ordered',
                         ordered_at DATETIME NOT NULL,
                         ordered_by_user_id INTEGER NOT NULL,
+                        order_no VARCHAR(16),
                         order_jpg_path VARCHAR(512),
                         received_at DATETIME,
                         received_by_user_id INTEGER,
@@ -452,6 +453,10 @@ def ensure_iol_order_schema(engine):
                     """
                 )
             )
+            rows = conn.execute(text("PRAGMA table_info(iol_order)")).fetchall()
+            iol_order_cols = {row[1] for row in rows} if rows else set()
+            if "order_no" not in iol_order_cols:
+                conn.execute(text("ALTER TABLE iol_order ADD COLUMN order_no VARCHAR(16)"))
             return
 
         conn.execute(
@@ -499,6 +504,7 @@ def ensure_iol_order_schema(engine):
                     status VARCHAR(32) NOT NULL DEFAULT 'ordered',
                     ordered_at TIMESTAMP NOT NULL,
                     ordered_by_user_id INTEGER NOT NULL REFERENCES public.users(id),
+                    order_no VARCHAR(16),
                     order_jpg_path VARCHAR(512),
                     received_at TIMESTAMP,
                     received_by_user_id INTEGER REFERENCES public.users(id),
@@ -526,3 +532,7 @@ def ensure_iol_order_schema(engine):
                 """
             )
         )
+        if not _has_col("iol_order", "order_no"):
+            conn.execute(
+                text("ALTER TABLE public.iol_order ADD COLUMN order_no VARCHAR(16)")
+            )

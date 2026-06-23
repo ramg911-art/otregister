@@ -7,6 +7,7 @@ import os
 import re
 from datetime import datetime
 
+from sqlalchemy import extract, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import IOLOrder, IOLOrderStatusLog, IOLMaster, IOLSupplier, OTRegister, User
@@ -31,6 +32,7 @@ POWER_RE = re.compile(r"^\+\d{1,2}\.\d{2}$")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IOL_ORDER_UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "iol_orders")
+HOSPITAL_LOGO_PATH = os.path.join(BASE_DIR, "app", "static", "img", "skp_logo.png")
 
 
 def ensure_upload_dir() -> str:
@@ -53,6 +55,40 @@ def format_iol_power_display(power: str) -> str:
     if p.upper().endswith("D"):
         return p
     return f"{p}D"
+
+
+def allocate_order_number(db: Session, when: datetime) -> str:
+    """Format mmyyno — e.g. 10th order in June 2026 → 062610."""
+    mm = when.month
+    yy = when.year % 100
+    prefix = f"{mm:02d}{yy:02d}"
+    n = (
+        db.query(func.count(IOLOrder.id))
+        .filter(
+            extract("month", IOLOrder.ordered_at) == mm,
+            extract("year", IOLOrder.ordered_at) == when.year,
+        )
+        .scalar()
+    ) or 0
+    return f"{prefix}{int(n) + 1}"
+
+
+def order_jpg_filename(patient_name: str, iol_power: str, upload_dir: str) -> str:
+    """patientname_IOL_power.jpg (sanitized, unique if collision)."""
+    raw_name = (patient_name or "patient").strip()
+    name_part = re.sub(r"[^\w]+", "_", raw_name, flags=re.UNICODE)
+    name_part = re.sub(r"_+", "_", name_part).strip("_")[:50] or "patient"
+    power_part = format_iol_power_display(iol_power).replace(" ", "")
+    base = f"{name_part}_{power_part}"
+    filename = f"{base}.jpg"
+    if not os.path.exists(os.path.join(upload_dir, filename)):
+        return filename
+    i = 2
+    while True:
+        filename = f"{base}_{i}.jpg"
+        if not os.path.exists(os.path.join(upload_dir, filename)):
+            return filename
+        i += 1
 
 
 def is_cataract_case(record: OTRegister) -> bool:
@@ -150,50 +186,25 @@ def generate_order_jpg(
 ) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
 
-    img_w, img_h = 720, 520
-    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
+    img_w = 760
+    line_h = 26
+    iol_name = iol.iol_name or "—"
+    iol_power_disp = format_iol_power_display(order.iol_power)
 
-    try:
-        if os.name == "nt":
-            font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
-            font_b = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 18)
-            font_title = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 22)
-        else:
-            font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15
-            )
-            font_b = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18
-            )
-            font_title = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22
-            )
-    except Exception:
-        font = ImageFont.load_default()
-        font_b = font
-        font_title = font
-
-    blue = (0, 51, 102)
-    y = 24
-    title = "IOL ORDER"
-    bbox = draw.textbbox((0, 0), title, font=font_title)
-    draw.text(((img_w - (bbox[2] - bbox[0])) // 2, y), title, fill=blue, font=font_title)
-    y += 40
-
-    ordered_at = order.ordered_at.strftime("%d/%m/%Y %H:%M")
-    lines = [
-        ("Order #", str(order.id)),
-        ("Order date / time", ordered_at),
+    pre_lines = [
+        ("Order date / time", order.ordered_at.strftime("%d/%m/%Y %H:%M")),
         ("Ordered by", ordered_by.username if ordered_by else "—"),
         ("", ""),
         ("Patient", ot.patient_name or "—"),
         ("UHID", ot.patient_uhid or "—"),
-        ("Surgery date", ot.date_of_surgery.strftime("%d/%m/%Y") if ot.date_of_surgery else "—"),
+        (
+            "Surgery date",
+            ot.date_of_surgery.strftime("%d/%m/%Y") if ot.date_of_surgery else "—",
+        ),
         ("Eye", ot.eye or "—"),
         ("", ""),
-        ("IOL", iol.iol_name),
-        ("IOL power", format_iol_power_display(order.iol_power)),
+    ]
+    post_lines = [
         ("", ""),
         ("Supplier", supplier.supplier_name),
         ("Supplier phone", supplier.supplier_phone),
@@ -201,14 +212,118 @@ def generate_order_jpg(
         ("Contact phone", supplier.contact_person_phone),
     ]
 
-    for label, value in lines:
-        if not label and not value:
-            y += 8
-            continue
-        draw.text((40, y), f"{label}:", fill=(80, 80, 80), font=font_b if label else font)
-        if label:
-            draw.text((220, y), value, fill=(30, 30, 30), font=font)
-        y += 26
+    box_pad = 14
+    box_line_h = 30
+    box_h = box_pad * 2 + box_line_h * 2
+    box_gap = 12
+
+    def _section_height(lines: list[tuple[str, str]]) -> int:
+        return sum(line_h if label or value else 8 for label, value in lines)
+
+    header_h = 118
+    title_block = 72
+    body_h = _section_height(pre_lines) + box_h + box_gap + _section_height(post_lines)
+    img_h = header_h + title_block + body_h + 32
+
+    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        if os.name == "nt":
+            font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
+            font_b = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 16)
+            font_title = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 22)
+            font_hospital = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 19)
+            font_iol = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 18)
+        else:
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15
+            )
+            font_b = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16
+            )
+            font_title = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22
+            )
+            font_hospital = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 19
+            )
+            font_iol = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18
+            )
+        except Exception:
+        font = ImageFont.load_default()
+        font_b = font
+        font_title = font
+        font_hospital = font
+
+        font_hospital = font
+        font_iol = font_b
+
+    def _draw_lines(lines: list[tuple[str, str]], start_y: int) -> int:
+        cy = start_y
+        for label, value in lines:
+            if not label and not value:
+                cy += 8
+                continue
+            draw.text((40, cy), f"{label}:", fill=(80, 80, 80), font=font_b)
+            draw.text((220, cy), value, fill=(30, 30, 30), font=font)
+            cy += line_h
+        return cy
+
+    blue = (0, 51, 102)
+    gray = (60, 60, 60)
+    y = 16
+
+    if os.path.isfile(HOSPITAL_LOGO_PATH):
+        logo = Image.open(HOSPITAL_LOGO_PATH).convert("RGBA")
+        logo.thumbnail((88, 88), Image.Resampling.LANCZOS)
+        img.paste(logo, (24, y), logo)
+
+    hx = 128
+    draw.text((hx, y), "Sreekantapuram Hospital", fill=blue, font=font_hospital)
+    draw.text((hx, y + 28), "Kandiyoor, Mavelikara", fill=gray, font=font)
+    draw.text((hx, y + 50), "Phone 9061401183, 8281379059", fill=gray, font=font)
+
+    y = header_h
+    draw.line((20, y, img_w - 20, y), fill=blue, width=2)
+    y += 18
+
+    title = "IOL ORDER"
+    bbox = draw.textbbox((0, 0), title, font=font_title)
+    draw.text(
+        ((img_w - (bbox[2] - bbox[0])) // 2, y), title, fill=blue, font=font_title
+    )
+    y += 36
+
+    order_no = order.order_no or str(order.id)
+    order_line = f"Order No: {order_no}"
+    bbox = draw.textbbox((0, 0), order_line, font=font_b)
+    draw.text(
+        ((img_w - (bbox[2] - bbox[0])) // 2, y), order_line, fill=(30, 30, 30), font=font_b
+    )
+    y += 36
+
+    y = _draw_lines(pre_lines, y)
+
+    box_x1, box_x2 = 32, img_w - 32
+    box_y1 = y
+    box_y2 = y + box_h
+    draw.rectangle([box_x1, box_y1, box_x2, box_y2], outline=blue, width=2)
+
+    inner_x_label = box_x1 + box_pad
+    inner_x_value = box_x1 + box_pad + 100
+    inner_y = box_y1 + box_pad
+    draw.text((inner_x_label, inner_y), "IOL:", fill=(80, 80, 80), font=font_b)
+    draw.text((inner_x_value, inner_y), iol_name, fill=(20, 20, 20), font=font_iol)
+    inner_y += box_line_h
+    draw.text((inner_x_label, inner_y), "IOL power:", fill=(80, 80, 80), font=font_b)
+    draw.text(
+        (inner_x_value, inner_y), iol_power_disp, fill=(20, 20, 20), font=font_iol
+    )
+
+    y = box_y2 + box_gap
+    _draw_lines(post_lines, y)
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=92)
@@ -241,6 +356,7 @@ def _create_iol_order_record(
         raise ValueError("Supplier not found for this IOL")
 
     now = datetime.now()
+    order_no = allocate_order_number(db, now)
     order = IOLOrder(
         ot_register_id=ot_register_id,
         iol_id=iol_id,
@@ -248,6 +364,7 @@ def _create_iol_order_record(
         status=STATUS_ORDERED,
         ordered_at=now,
         ordered_by_user_id=user.id,
+        order_no=order_no,
     )
     db.add(order)
     db.flush()
@@ -256,7 +373,7 @@ def _create_iol_order_record(
         order=order, ot=ot, iol=iol, supplier=supplier, ordered_by=user
     )
     upload_dir = ensure_upload_dir()
-    filename = f"iol_order_{order.id}_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+    filename = order_jpg_filename(ot.patient_name or "patient", power, upload_dir)
     filepath = os.path.join(upload_dir, filename)
     with open(filepath, "wb") as f:
         f.write(jpg_bytes)

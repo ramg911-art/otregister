@@ -175,6 +175,7 @@ class IOLOrder(Base):
 
     ordered_at = Column(DateTime, nullable=False)
     ordered_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    order_no = Column(String(16), nullable=True)
     order_jpg_path = Column(String(512), nullable=True)
 
     received_at = Column(DateTime, nullable=True)
